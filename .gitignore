@@ -1,0 +1,13 @@
+/target/
+**/*.rs.bk
+*.swp
+.direnv/
+.envrc
+.env
+.env.*
+pretokenized/
+tokenizer.json
+
+# Added by cargo
+
+/target
