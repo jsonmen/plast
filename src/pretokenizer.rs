@@ -1,4 +1,4 @@
-use crate::errors::PretokenizerError;
+use crate::errors::{PretokenizerError, ShardLoaderError};
 use crossbeam_channel::bounded;
 use polars::datatypes::StringChunked;
 use rayon::prelude::ParallelIterator;
@@ -20,7 +20,7 @@ pub fn pretokenize_dataset<I, P>(
     write_queue_size: usize,
 ) -> Result<Vec<PathBuf>, PretokenizerError>
 where
-    I: Iterator<Item = StringChunked> + Send + 'static,
+    I: Iterator<Item = Result<StringChunked, ShardLoaderError>> + Send + 'static,
     P: AsRef<Path>,
 {
     let save_dir_ref = save_dir.as_ref();
@@ -40,15 +40,24 @@ where
     // causing `rx.recv()` to hang forever. We wrap processing inside a worker thread
     // that safely drops `tx` when exiting scope, signaling the consumer to stop.
     std::thread::spawn(move || {
-        let _tx_guard = tx; // Will drop automatically when this thread terminates
-        for shard in dataset {
+        let _tx_guard = tx;
+
+        for shard_result in dataset {
+            let shard = match shard_result {
+                Ok(s) => s,
+                Err(err) => {
+                    eprintln!("Skipping corrupted shard: {err}");
+                    continue;
+                }
+            };
+
             let tx_shard = _tx_guard.clone();
             shard.par_iter().for_each_with(tx_shard, |tx, opt_text| {
                 if let Some(text) = opt_text
                     && let Ok(encoding) = tokenizer_clone.encode_fast(text, false)
                 {
                     let ids = encoding.get_ids().to_vec();
-                    let _ = tx.send(ids); // Ignore errors if consumer dropped
+                    let _ = tx.send(ids);
                 }
             });
         }

@@ -1,6 +1,6 @@
 [package]
 name = "plast"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 
 [lib]
@@ -16,7 +16,7 @@ bytemuck = "1.25.0"
 crossbeam-channel = "0.5.15"
 memmap2 = "0.9.10"
 # Rayon, lazy processing, and fast string conversions are fully encapsulated here
-polars = { version = "0.54.2", features = ["lazy", "strings", "ipc", "parquet", "ipc_streaming", "performant"] }
+polars = { version = "0.54.2", features = ["lazy", "strings", "ipc", "parquet", "ipc_streaming", "performant", "json", "csv"] }
 rayon = "1.12.0"
 tokenizers = "0.23.1"
 thiserror = "2.0.18"

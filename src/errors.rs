@@ -63,24 +63,22 @@ pub enum ShardLoaderError {
         path: PathBuf,
     },
 
-    #[error("Failed to parse Arrow IPC Stream framework data from file: {path}")]
-    IpcParseFailed {
+    #[error("Failed to parse file via Polars engine: {path}")]
+    PolarsParseFailed {
         #[source]
         source: polars::prelude::PolarsError,
         path: PathBuf,
     },
 
-    #[error("Required column 'text' was not found in dataset file schema: {path}")]
-    ColumnMissing {
-        #[source]
-        source: polars::prelude::PolarsError,
-        path: PathBuf,
-    },
+    #[error("Required column '{column}' was not found in dataset file schema: {path}")]
+    ColumnMissing { column: String, path: PathBuf },
 
-    #[error("Column 'text' exists but is not of expected String type in file: {path}")]
-    InvalidColumnType {
-        #[source]
-        source: polars::prelude::PolarsError,
-        path: PathBuf,
-    },
+    #[error("Column '{column}' exists but is not of expected String type in file: {path}")]
+    InvalidColumnType { column: String, path: PathBuf },
+
+    #[error("Unsupported or missing file extension for file: {path}")]
+    UnsupportedExtension { path: PathBuf },
+
+    #[error("Invalid path representation for file: {path}")]
+    InvalidPath { path: PathBuf },
 }

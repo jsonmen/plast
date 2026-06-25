@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 🗺️ Roadmap / Todo List
 
-* [ ] **Broader Format Support:** Add native streaming support for common data storage formats like Apache Parquet.
+* [x] **Broader Format Support:** Add native streaming support for common data storage formats like Apache Parquet.
 * [ ] **Double-Buffered Pre-loading:** Double-buffer shards directly into RAM. While the GPU is crunching the current memory block, the CPU preloads the next shard in the background to break past physical SSD bottlenecks.
 * [ ] **Deep Learning Integration:** Build first-class integrations for the `Burn` framework.
 

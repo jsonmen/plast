@@ -53,7 +53,7 @@ fn bench_pretokenizer(c: &mut Criterion) {
         b.iter_with_setup(
             || TempDir::new().unwrap(),
             |tmp_dir| {
-                let iterator_source = vec![dataset.clone()].into_iter();
+                let iterator_source = vec![Ok(dataset.clone())].into_iter();
                 let _ = pretokenize_dataset(
                     &tokenizer,
                     iterator_source,
@@ -79,7 +79,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     // Setup background state once before benchmarking
     let paths = pretokenize_dataset(
         &tokenizer,
-        vec![dataset].into_iter(),
+        vec![Ok(dataset)].into_iter(),
         tmp_dir.path(),
         100 * 1024 * 1024,
         50256,
