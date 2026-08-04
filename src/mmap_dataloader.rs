@@ -9,7 +9,7 @@ use std::path::Path;
 /// of data, exposing contiguous slice views across underlying bytes.
 ///
 /// It assumes every element in the dataset is a 4-byte token (e.g., `u32` or `i32`).
-pub struct PretokenizedDataLoader {
+pub struct MmapPretokenizedDataLoader {
     /// Vector of raw memory-mapped files.
     shards: Vec<Mmap>,
     /// Track logical capacity per shard measured in *elements* (4 bytes each).
@@ -21,7 +21,7 @@ pub struct PretokenizedDataLoader {
     total_size: usize,
 }
 
-impl PretokenizedDataLoader {
+impl MmapPretokenizedDataLoader {
     /// Maps a collection of data files into memory.
     ///
     /// # Arguments
@@ -122,8 +122,8 @@ impl PretokenizedDataLoader {
     ///
     /// # Examples
     /// ```no_run
-    /// # use plast::PretokenizedDataLoader;
-    /// # let loader = PretokenizedDataLoader::map_data(vec!["shard.bin"]).unwrap();
+    /// # use plast::MmapPretokenizedDataLoader;
+    /// # let loader = MmapPretokenizedDataLoader::map_data(vec!["shard.bin"]).unwrap();
     /// if let Some((input, target)) = loader.get_tf_batch_u8(0, 1024) {
     ///     assert_eq!(input.len(), 4096);
     ///     assert_eq!(target.len(), 4096);
@@ -190,7 +190,7 @@ impl PretokenizedDataLoader {
 
 /// A generic zero-copy iterator over `PretokenizedDataLoader` shards.
 pub struct ChunkedShardIter<'a, T> {
-    dataloader: &'a PretokenizedDataLoader,
+    dataloader: &'a MmapPretokenizedDataLoader,
     current_idx: usize, // Element tracking relative to the *current* active shard
     current_file_idx: usize,
     num_elements: usize,
@@ -198,7 +198,7 @@ pub struct ChunkedShardIter<'a, T> {
 }
 
 impl<'a, T> ChunkedShardIter<'a, T> {
-    fn new(dataloader: &'a PretokenizedDataLoader, num_elements: usize) -> Self {
+    fn new(dataloader: &'a MmapPretokenizedDataLoader, num_elements: usize) -> Self {
         Self {
             dataloader,
             current_idx: 0,

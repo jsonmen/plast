@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use plast::dataloader::PretokenizedDataLoader;
+    use plast::mmap_dataloader::MmapPretokenizedDataLoader;
     use std::io::Write;
     use tempfile::NamedTempFile;
     // Helper function to create temporary valid mock files filled with structured tokens
@@ -21,7 +21,7 @@ mod tests {
         let file2 = create_mock_shard(&shard2_data);
 
         let paths = vec![file1.path().to_path_buf(), file2.path().to_path_buf()];
-        let loader = PretokenizedDataLoader::map_data(paths).unwrap();
+        let loader = MmapPretokenizedDataLoader::map_data(paths).unwrap();
 
         // Validate Structural Metadata assertions
         assert_eq!(loader.total_num_shards(), 2);
@@ -37,7 +37,7 @@ mod tests {
         tmp_file.flush().unwrap();
 
         let paths = vec![tmp_file.path().to_path_buf()];
-        let result = PretokenizedDataLoader::map_data(paths);
+        let result = MmapPretokenizedDataLoader::map_data(paths);
 
         assert!(result.is_err());
     }
@@ -47,7 +47,7 @@ mod tests {
         let shard_data = vec![10u32, 20, 30, 40, 50];
         let file = create_mock_shard(&shard_data);
 
-        let loader = PretokenizedDataLoader::map_data(vec![file.path()]).unwrap();
+        let loader = MmapPretokenizedDataLoader::map_data(vec![file.path()]).unwrap();
 
         // Get batch context window size of 2 elements (8 bytes), index 0
         let (input, target) = loader.get_tf_batch_u8(0, 2).unwrap();
@@ -71,7 +71,8 @@ mod tests {
         let file1 = create_mock_shard(&shard1_data);
         let file2 = create_mock_shard(&shard2_data);
 
-        let loader = PretokenizedDataLoader::map_data(vec![file1.path(), file2.path()]).unwrap();
+        let loader =
+            MmapPretokenizedDataLoader::map_data(vec![file1.path(), file2.path()]).unwrap();
 
         // Test U32 chunk parsing loop
         let mut iter_u32 = loader.iter_u32(2);

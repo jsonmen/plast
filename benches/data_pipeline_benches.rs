@@ -1,5 +1,5 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use plast::{PretokenizedDataLoader, pretokenize_dataset};
+use plast::{MmapPretokenizedDataLoader, pretokenize_dataset};
 use polars::prelude::*;
 use std::io::Write;
 use std::time::Instant;
@@ -87,7 +87,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     )
     .unwrap();
 
-    let loader = PretokenizedDataLoader::map_data(paths).unwrap();
+    let loader = MmapPretokenizedDataLoader::map_data(paths).unwrap();
     let total_elements = loader.total_size();
     let total_bytes = total_elements * 4;
 
