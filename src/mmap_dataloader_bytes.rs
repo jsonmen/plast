@@ -1,18 +1,28 @@
 use crate::errors::DataLoaderError;
-use bytemuck::Pod;
+use bytes::Bytes;
 use memmap2::Mmap;
 use std::fs::File;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Arc;
+
+#[derive(Clone)]
+struct MmapOwner(Arc<Mmap>);
+
+impl AsRef<[u8]> for MmapOwner {
+    fn as_ref(&self) -> &[u8] {
+        &self.0[..]
+    }
+}
 
 /// A high-performance data loader that memory-maps multiple pretokenized shards
 /// of data, exposing contiguous slice views across underlying bytes.
 ///
 /// It assumes every element in the dataset is a 4-byte token (e.g., `u32` or `i32`).
 #[derive(Debug)]
-pub struct MmapPretokenizedDataLoader {
+pub struct MmapPretokenizedDataLoaderBytes {
     /// Vector of raw memory-mapped files.
-    shards: Vec<Mmap>,
+    shards: Vec<Bytes>,
     /// Track logical capacity per shard measured in *elements* (4 bytes each).
     shard_lengths: Vec<usize>,
     /// Cumulative raw byte start offsets for calculating global locations.
@@ -22,7 +32,7 @@ pub struct MmapPretokenizedDataLoader {
     total_size: usize,
 }
 
-impl MmapPretokenizedDataLoader {
+impl MmapPretokenizedDataLoaderBytes {
     /// Maps a collection of data files into memory.
     ///
     /// # Arguments
@@ -75,7 +85,10 @@ impl MmapPretokenizedDataLoader {
 
             total_size += num_elements;
             shard_lengths.push(num_elements);
-            shards.push(mmap);
+            let owner = MmapOwner(Arc::new(mmap));
+
+            let bytes = Bytes::from_owner(owner);
+            shards.push(bytes);
         }
 
         // Push final terminal boundary for the binary search interval math
@@ -113,93 +126,25 @@ impl MmapPretokenizedDataLoader {
         &self.shard_offsets
     }
 
-    /// Retrieves input and target byte slices using u32-element based indexing.
-    ///
-    /// This splits a contiguous window into current context (`input`) and shifted targets (`target`).
-    ///
-    /// # Arguments
-    /// * `idx` - Logical sequence/batch multiplier.
-    /// * `batch_elements` - Sequence context window size in element count.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use plast::MmapPretokenizedDataLoader;
-    /// # let loader = MmapPretokenizedDataLoader::map_data(vec!["shard.bin"]).unwrap();
-    /// if let Some((input, target)) = loader.get_tf_batch_u8(0, 1024) {
-    ///     assert_eq!(input.len(), 4096);
-    ///     assert_eq!(target.len(), 4096);
-    /// }
-    /// ```
-    pub fn get_tf_batch_u8(&self, idx: usize, batch_elements: usize) -> Option<(&[u8], &[u8])> {
-        let batch_byte_len = batch_elements * 4;
-        let global_byte_offset = idx * batch_byte_len;
-
-        // CONFUSING MOMENT: Finding which shard contains our global offset.
-        // `binary_search` searches for the absolute byte position.
-        // If an exact match is hit (Ok), that's our shard index.
-        // If it falls between boundaries (Err(idx)), the correct shard is the one right before it (idx - 1).
-        let shard_idx = match self.shard_offsets.binary_search(&global_byte_offset) {
-            Ok(exact_match) => exact_match,
-            Err(insertion_point) => {
-                if insertion_point == 0 {
-                    return None; // Offset is out of bounds (before start)
-                }
-                insertion_point - 1
-            }
-        };
-
-        if shard_idx >= self.shards.len() {
-            return None;
-        }
-
-        // CONFUSING MOMENT: Converting global coordinates back to local shard space.
-        // Subtract the shard's starting global offset from our target global offset.
-        let local_start = global_byte_offset - self.shard_offsets[shard_idx];
-        let shard_byte_len = self.shard_lengths[shard_idx] * 4;
-
-        // Ensure we don't read past the end of this *specific* shard.
-        // Note: Target requires a 4-byte lookahead shifted right (local_start + 4),
-        // so we must ensure `local_start + batch_byte_len + 4` fits in the shard.
-        if local_start + batch_byte_len + 4 <= shard_byte_len {
-            let mmap = &self.shards[shard_idx];
-
-            let input = mmap.get(local_start..local_start + batch_byte_len)?;
-            let target = mmap.get(local_start + 4..local_start + batch_byte_len + 4)?;
-
-            Some((input, target))
-        } else {
-            // Straddling across two separate shards is unsupported to avoid allocation/copying.
-            None
-        }
+    pub fn iter(&self, num_elements: usize) -> ChunkedShardBytesIter<'_, &'_ [u8]> {
+        ChunkedShardBytesIter::new(self, num_elements)
     }
-
-    /// Creates an iterator yielding chunks cast as `&[u32]`.
-    pub fn iter_u32(&self, num_elements: usize) -> ChunkedShardIter<'_, u32> {
-        ChunkedShardIter::new(self, num_elements)
-    }
-
-    /// Creates an iterator yielding chunks cast as raw bytes `&[u8]`.
-    pub fn iter_u8(&self, num_elements: usize) -> ChunkedShardIter<'_, u8> {
-        ChunkedShardIter::new(self, num_elements)
-    }
-
-    /// Creates an iterator yielding chunks cast as `&[i32]`.
-    pub fn iter_i32(&self, num_elements: usize) -> ChunkedShardIter<'_, i32> {
-        ChunkedShardIter::new(self, num_elements)
+    pub fn iter_tf(&self, num_elements: usize) -> ChunkedShardBytesIter<'_, (Bytes, Bytes)> {
+        ChunkedShardBytesIter::new(self, num_elements)
     }
 }
 
 /// A generic zero-copy iterator over `PretokenizedDataLoader` shards.
-pub struct ChunkedShardIter<'a, T> {
-    dataloader: &'a MmapPretokenizedDataLoader,
+pub struct ChunkedShardBytesIter<'a, T> {
+    dataloader: &'a MmapPretokenizedDataLoaderBytes,
     current_idx: usize, // Element tracking relative to the *current* active shard
     current_file_idx: usize,
     num_elements: usize,
     _marker: PhantomData<T>,
 }
 
-impl<'a, T> ChunkedShardIter<'a, T> {
-    fn new(dataloader: &'a MmapPretokenizedDataLoader, num_elements: usize) -> Self {
+impl<'a, T> ChunkedShardBytesIter<'a, T> {
+    fn new(dataloader: &'a MmapPretokenizedDataLoaderBytes, num_elements: usize) -> Self {
         Self {
             dataloader,
             current_idx: 0,
@@ -210,8 +155,8 @@ impl<'a, T> ChunkedShardIter<'a, T> {
     }
 }
 
-impl<'a, T: Pod> Iterator for ChunkedShardIter<'a, T> {
-    type Item = &'a [T];
+impl<'a> Iterator for ChunkedShardBytesIter<'a, &'a [u8]> {
+    type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
         // Loop tracks file boundaries, rolling over to the next shard if the current one is exhausted
@@ -234,6 +179,34 @@ impl<'a, T: Pod> Iterator for ChunkedShardIter<'a, T> {
 
             // If the remaining window straddles a shard boundary, we drop the remainder chunk
             // and advance to clean alignments on the next shard.
+            self.current_file_idx += 1;
+            self.current_idx = 0;
+        }
+
+        None
+    }
+}
+impl<'a> Iterator for ChunkedShardBytesIter<'a, (Bytes, Bytes)> {
+    type Item = (Bytes, Bytes);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.current_file_idx < self.dataloader.total_num_shards() {
+            let active_shard = &self.dataloader.shards[self.current_file_idx];
+            let shard_byte_len = self.dataloader.shard_lengths[self.current_file_idx] * 4;
+
+            let local_start = self.current_idx * 4;
+            let batch_byte_len = self.num_elements * 4;
+
+            // Check if input + 4-byte target shift fits inside the current shard boundary
+            if local_start + batch_byte_len + 4 <= shard_byte_len {
+                let input = active_shard.slice(local_start..local_start + batch_byte_len);
+                let target = active_shard.slice(local_start + 4..local_start + batch_byte_len + 4);
+
+                self.current_idx += self.num_elements;
+                return Some((input, target));
+            }
+
+            // Move to the next shard if the request straddles the boundary or overflows
             self.current_file_idx += 1;
             self.current_idx = 0;
         }

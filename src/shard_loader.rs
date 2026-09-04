@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 /// A streaming shard loader that reads data files sequentially,
 /// extracting a specified text column as a Polars `StringChunked` array.
+#[derive(Debug)]
 pub struct ShardLoader {
     dataset_files: Vec<PathBuf>,
     text_column_name: String,

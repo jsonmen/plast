@@ -29,8 +29,8 @@ fn create_heavy_mock_dataset(rows: usize) -> StringChunked {
 
     Series::new("text".into(), values).str().unwrap().clone()
 }
+
 fn create_mock_tokenizer() -> Tokenizer {
-    // Look up the file relative to this test file's directory
     let large_json_data = include_str!("../fixtures/mock_tokenizer.json");
 
     let mut tmp_json_file = NamedTempFile::new().expect("Failed to create temp file");
@@ -45,20 +45,56 @@ fn create_mock_tokenizer() -> Tokenizer {
 /// 1. BENCHMARK: CPU Pretokenizer pipeline throughput
 fn bench_pretokenizer(c: &mut Criterion) {
     let tokenizer = create_mock_tokenizer();
-    let dataset = create_heavy_mock_dataset(200_000); // Scale down slightly so Criterion iterations are snappy
+    let dataset = create_heavy_mock_dataset(200_000);
 
-    let mut group = c.benchmark_group("Pretokenizer_Throughput");
+    // 1. Calculate raw input bytes
+    let raw_bytes = dataset
+        .iter()
+        .flatten()
+        .map(|s| s.len() as u64)
+        .sum::<u64>();
 
-    group.bench_function("Parallel_Tokenization_and_Sharding", |b| {
+    // 2. Compute exact token count produced by this dataset for exact Mtok/s metrics
+    //    (Or estimate if tokenizing upfront is too heavy)
+    let total_tokens: u64 = dataset
+        .iter()
+        .flatten()
+        .map(|s| tokenizer.encode(s, false).unwrap().get_ids().len() as u64)
+        .sum();
+
+    let mut group = c.benchmark_group("Pretokenizer_Performance");
+    group.measurement_time(std::time::Duration::from_secs(15));
+    group.sample_size(20);
+    // --- Metric 1: Input Data Throughput (MiB/s or GiB/s) ---
+    group.throughput(Throughput::Bytes(raw_bytes));
+    group.bench_function("Input_Bytes_Throughput", |b| {
         b.iter_with_setup(
             || TempDir::new().unwrap(),
             |tmp_dir| {
-                let iterator_source = vec![Ok(dataset.clone())].into_iter();
                 let _ = pretokenize_dataset(
                     &tokenizer,
-                    iterator_source,
+                    vec![Ok(dataset.clone())].into_iter(),
                     tmp_dir.path(),
-                    50 * 1024 * 1024, // 50MB limits
+                    50 * 1024 * 1024,
+                    50256,
+                    8,
+                )
+                .unwrap();
+            },
+        );
+    });
+
+    // --- Metric 2: Output Token Generation Rate (tok/s or Mtok/s) ---
+    group.throughput(Throughput::Elements(total_tokens));
+    group.bench_function("Output_Tokens_Throughput", |b| {
+        b.iter_with_setup(
+            || TempDir::new().unwrap(),
+            |tmp_dir| {
+                let _ = pretokenize_dataset(
+                    &tokenizer,
+                    vec![Ok(dataset.clone())].into_iter(),
+                    tmp_dir.path(),
+                    50 * 1024 * 1024,
                     50256,
                     8,
                 )
@@ -123,7 +159,6 @@ fn bench_gpu_saturation(c: &mut Criterion) {
                         let n = raw_tokens.len();
 
                         // Async transport across PCIe bus topology profiles
-
                         unsafe {
                             let (src, _record_src) = gpu_vec.device_ptr(&stream);
                             let _ = cudarc::driver::result::memcpy_htod_async(
