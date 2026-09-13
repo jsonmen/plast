@@ -1,11 +1,15 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use plast::{MmapPretokenizedDataLoader, pretokenize_dataset};
+use plast::dataloader::{BYTES_PER_TOKEN, Dataloader};
+use plast::datatypes::BytesConverter;
+use plast::mmap_storage::MmapStorage;
+use plast::pretokenize_dataset;
+use plast::storage::Storage;
 use polars::prelude::*;
 use std::io::Write;
 use std::time::Instant;
-use tempfile::NamedTempFile;
-use tempfile::TempDir;
+use tempfile::{NamedTempFile, TempDir};
 use tokenizers::Tokenizer;
+
 // CUDA specific driver bindings
 use cudarc::driver::{CudaContext, DevicePtr, LaunchConfig, PushKernelArg};
 use cudarc::nvrtc::Ptx;
@@ -55,7 +59,6 @@ fn bench_pretokenizer(c: &mut Criterion) {
         .sum::<u64>();
 
     // 2. Compute exact token count produced by this dataset for exact Mtok/s metrics
-    //    (Or estimate if tokenizing upfront is too heavy)
     let total_tokens: u64 = dataset
         .iter()
         .flatten()
@@ -65,6 +68,7 @@ fn bench_pretokenizer(c: &mut Criterion) {
     let mut group = c.benchmark_group("Pretokenizer_Performance");
     group.measurement_time(std::time::Duration::from_secs(15));
     group.sample_size(20);
+
     // --- Metric 1: Input Data Throughput (MiB/s or GiB/s) ---
     group.throughput(Throughput::Bytes(raw_bytes));
     group.bench_function("Input_Bytes_Throughput", |b| {
@@ -112,7 +116,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     let dataset = create_heavy_mock_dataset(500_000);
     let tmp_dir = TempDir::new().unwrap();
 
-    // Setup background state once before benchmarking
+    // Pretokenize data shards
     let paths = pretokenize_dataset(
         &tokenizer,
         vec![Ok(dataset)].into_iter(),
@@ -123,11 +127,13 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     )
     .unwrap();
 
-    let loader = MmapPretokenizedDataLoader::map_data(paths).unwrap();
-    let total_elements = loader.total_size();
-    let total_bytes = total_elements * 4;
+    // Context size calculations
+    let temp_storage = MmapStorage::load_data(paths.clone()).unwrap();
+    let total_elements = temp_storage.total_size();
+    let total_bytes = total_elements * BYTES_PER_TOKEN;
+    drop(temp_storage);
 
-    // Initialize graphics hardware context handles
+    // Initialize CUDA hardware context handles
     let ctx = CudaContext::new(0).expect("Missing CUDA GPU device context execution capability.");
     let stream = ctx.default_stream();
     let module = ctx
@@ -136,29 +142,34 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     let f = module.load_function("sum_tokens").unwrap();
 
     let context_window_elements = 4096;
+    let context_window_bytes = context_window_elements * BYTES_PER_TOKEN;
+
     let gpu_vec = stream.alloc_zeros::<u32>(context_window_elements).unwrap();
     let mut dev_sum = stream.alloc_zeros::<u64>(1).unwrap();
     let iterations = total_elements / context_window_elements;
 
     let mut group = c.benchmark_group("GPU_Saturation");
-    // Define the throughput scale tracking metric directly for Criterion reporting graphs
     group.throughput(Throughput::Bytes(total_bytes as u64));
 
-    // Use iter_custom to accurately track GPU streaming without timing CPU mapping steps
-    group.bench_function("H2D_Transfer_Plus_Reduction", |b| {
+    // --- Strategy A: Random-Access Batching via `storage.slice_random` ---
+    group.bench_function("H2D_Transfer_Plus_Reduction_SliceRandom", |b| {
         b.iter_custom(|iters| {
+            // Pre-create `iters` storage instances so creation time isn't measured
+            let storages: Vec<_> = (0..iters)
+                .map(|_| MmapStorage::load_data(paths.clone()).unwrap())
+                .collect();
+
             let start = Instant::now();
 
-            // Execute the custom batch pipeline matching criterion loop sample expectations
-            for _ in 0..iters {
+            for storage in storages {
                 for step in 0..iterations {
-                    if let Some((input_bytes, _)) =
-                        loader.get_tf_batch_u8(step, context_window_elements)
-                    {
-                        let raw_tokens: &[u32] = bytemuck::cast_slice(input_bytes);
+                    let start_byte = step * context_window_bytes;
+                    let end_byte = start_byte + context_window_bytes;
+
+                    if let Some(input_bytes) = storage.slice_random(start_byte..end_byte) {
+                        let raw_tokens: &[u32] = bytemuck::cast_slice(&input_bytes[..]);
                         let n = raw_tokens.len();
 
-                        // Async transport across PCIe bus topology profiles
                         unsafe {
                             let (src, _record_src) = gpu_vec.device_ptr(&stream);
                             let _ = cudarc::driver::result::memcpy_htod_async(
@@ -167,6 +178,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
                                 stream.cu_stream(),
                             );
                         };
+
                         let threads_per_block = 256;
                         let blocks_per_grid =
                             ((n + threads_per_block - 1) / threads_per_block) as u32;
@@ -183,9 +195,59 @@ fn bench_gpu_saturation(c: &mut Criterion) {
                         unsafe { launch_args.launch(cfg) }.unwrap();
                     }
                 }
-                // Sync pipeline hardware completely before concluding iteration step time metrics
-                ctx.synchronize().unwrap();
             }
+            ctx.synchronize().unwrap();
+
+            start.elapsed()
+        });
+    });
+
+    // --- Strategy B: Sequential Zero-Copy Streaming via `Dataloader` Iterator ---
+    group.bench_function("H2D_Transfer_Plus_Reduction_DataloaderIter", |b| {
+        b.iter_custom(|iters| {
+            // Pre-allocate 'iters' owned storage objects before starting the clock
+            let storages: Vec<_> = (0..iters)
+                .map(|_| MmapStorage::load_data(paths.clone()).unwrap())
+                .collect();
+
+            let start = Instant::now();
+
+            for storage in storages {
+                // Owned `storage` is passed by value and consumed here
+                let dataloader = Dataloader::<MmapStorage, BytesConverter>::new(
+                    storage,
+                    context_window_elements,
+                );
+
+                for input_bytes in dataloader.iter_bytes() {
+                    let raw_tokens: &[u32] = bytemuck::cast_slice(&input_bytes[..]);
+                    let n = raw_tokens.len();
+
+                    unsafe {
+                        let (src, _record_src) = gpu_vec.device_ptr(&stream);
+                        let _ = cudarc::driver::result::memcpy_htod_async(
+                            src,
+                            raw_tokens,
+                            stream.cu_stream(),
+                        );
+                    };
+
+                    let threads_per_block = 256;
+                    let blocks_per_grid = ((n + threads_per_block - 1) / threads_per_block) as u32;
+                    let cfg = LaunchConfig {
+                        grid_dim: (blocks_per_grid, 1, 1),
+                        block_dim: (threads_per_block as u32, 1, 1),
+                        shared_mem_bytes: 0,
+                    };
+                    let mut launch_args = stream.launch_builder(&f);
+                    launch_args.arg(&gpu_vec);
+                    launch_args.arg(&mut dev_sum);
+                    launch_args.arg(&n);
+
+                    unsafe { launch_args.launch(cfg) }.unwrap();
+                }
+            }
+            ctx.synchronize().unwrap();
 
             start.elapsed()
         });
@@ -194,6 +256,5 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     group.finish();
 }
 
-// Macro configurations wiring up Criterion runner loops
 criterion_group!(benches, bench_pretokenizer, bench_gpu_saturation);
 criterion_main!(benches);

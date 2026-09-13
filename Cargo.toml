@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "data_pipeline_benches"
 harness = false
 
+[features]
+default = ["burn"]
+burn = ["dep:burn-tensor"]
+
 [dependencies]
 bytemuck = "1.25.0"
 crossbeam-channel = "0.5.15"
@@ -22,6 +26,7 @@ tokenizers = "0.23.1"
 thiserror = "2.0.18"
 log = "0.4.32"
 bytes = "1.12.1"
+burn-tensor = {version = "0.21.0", optional = true}
 
 [dev-dependencies]
 criterion = "0.8.2"
@@ -37,3 +42,4 @@ panic = "abort"
 
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
