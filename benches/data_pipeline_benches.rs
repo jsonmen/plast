@@ -1,4 +1,5 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use plast::AdviceSet;
 use plast::dataloader::{BYTES_PER_TOKEN, Dataloader};
 use plast::datatypes::BytesConverter;
 use plast::mmap_storage::MmapStorage;
@@ -116,7 +117,6 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     let dataset = create_heavy_mock_dataset(500_000);
     let tmp_dir = TempDir::new().unwrap();
 
-    // Pretokenize data shards
     let paths = pretokenize_dataset(
         &tokenizer,
         vec![Ok(dataset)].into_iter(),
@@ -127,13 +127,11 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     )
     .unwrap();
 
-    // Context size calculations
-    let temp_storage = MmapStorage::load_data(paths.clone()).unwrap();
+    let temp_storage = MmapStorage::load_data(paths.clone(), AdviceSet::default()).unwrap();
     let total_elements = temp_storage.total_size();
     let total_bytes = total_elements * BYTES_PER_TOKEN;
     drop(temp_storage);
 
-    // Initialize CUDA hardware context handles
     let ctx = CudaContext::new(0).expect("Missing CUDA GPU device context execution capability.");
     let stream = ctx.default_stream();
     let module = ctx
@@ -151,17 +149,16 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     let mut group = c.benchmark_group("GPU_Saturation");
     group.throughput(Throughput::Bytes(total_bytes as u64));
 
-    // --- Strategy A: Random-Access Batching via `storage.slice_random` ---
+    // --- Strategy A: Random-Access Batching ---
     group.bench_function("H2D_Transfer_Plus_Reduction_SliceRandom", |b| {
-        b.iter_custom(|iters| {
-            // Pre-create `iters` storage instances so creation time isn't measured
-            let storages: Vec<_> = (0..iters)
-                .map(|_| MmapStorage::load_data(paths.clone()).unwrap())
-                .collect();
+        // 1. Create storage ONCE outside the timing loop
+        let storage = MmapStorage::load_data(paths.clone(), AdviceSet::default()).unwrap();
 
+        b.iter_custom(|iters| {
             let start = Instant::now();
 
-            for storage in storages {
+            // 2. Reuse the SAME storage instance across all iterations
+            for _ in 0..iters {
                 for step in 0..iterations {
                     let start_byte = step * context_window_bytes;
                     let end_byte = start_byte + context_window_bytes;
@@ -197,25 +194,28 @@ fn bench_gpu_saturation(c: &mut Criterion) {
                 }
             }
             ctx.synchronize().unwrap();
-
             start.elapsed()
         });
     });
 
-    // --- Strategy B: Sequential Zero-Copy Streaming via `Dataloader` Iterator ---
+    // --- Strategy B: Sequential Zero-Copy Streaming ---
     group.bench_function("H2D_Transfer_Plus_Reduction_DataloaderIter", |b| {
-        b.iter_custom(|iters| {
-            // Pre-allocate 'iters' owned storage objects before starting the clock
-            let storages: Vec<_> = (0..iters)
-                .map(|_| MmapStorage::load_data(paths.clone()).unwrap())
-                .collect();
+        // 1. Create storage ONCE outside the timing loop
+        let storage = MmapStorage::load_data(paths.clone(), AdviceSet::default()).unwrap();
 
+        b.iter_custom(|iters| {
             let start = Instant::now();
 
-            for storage in storages {
-                // Owned `storage` is passed by value and consumed here
+            for _ in 0..iters {
+                // 2. Clone the storage for this iteration.
+                // Because MmapStorage uses `bytes::Bytes` (an Arc under the hood),
+                // this clone is O(1) and only bumps an atomic refcount.
+                // It DOES NOT create a new OS mmap, avoiding TLB thrashing.
+                let iter_storage = storage.clone();
+
+                // 3. Dataloader consumes the cloned storage, satisfying your API design
                 let dataloader = Dataloader::<MmapStorage, BytesConverter>::new(
-                    storage,
+                    iter_storage,
                     context_window_elements,
                 );
 

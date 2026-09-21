@@ -6,6 +6,8 @@ use crate::{
 use std::marker::PhantomData;
 
 pub const BYTES_PER_TOKEN: usize = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dataloader<S: Storage, D: DataloaderType> {
     storage: S,
     num_elements: usize,

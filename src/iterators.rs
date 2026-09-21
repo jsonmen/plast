@@ -1,6 +1,7 @@
 use crate::{datatypes::DataloaderType, storage::Storage};
 use std::marker::PhantomData;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataloaderIter<'a, S: Storage, D: DataloaderType> {
     storage: &'a S,
     current_idx: usize,

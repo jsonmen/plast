@@ -1,3 +1,4 @@
+use crate::advice_set::AdviceSet;
 use crate::errors::DataLoaderError;
 use crate::storage::Storage;
 use bytes::Bytes;
@@ -14,6 +15,8 @@ impl AsRef<[u8]> for MmapOwner {
         &self.0[..]
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MmapStorage {
     /// Vector of raw memory-mapped files.
     shards: Vec<Bytes>,
@@ -24,10 +27,15 @@ pub struct MmapStorage {
     shard_offsets: Vec<usize>,
     /// Total logical elements across all shards combined.
     total_size: usize,
+    advice_set: AdviceSet,
 }
 impl MmapStorage {
-    pub fn load_data<P: AsRef<Path>>(data_files: Vec<P>) -> Result<Self, DataLoaderError> {
+    pub fn load_data<P: AsRef<Path>>(
+        data_files: Vec<P>,
+        advice_set: impl Into<AdviceSet>,
+    ) -> Result<Self, DataLoaderError> {
         let files_count = data_files.len();
+        let advice_set = advice_set.into();
         let mut shards = Vec::with_capacity(files_count);
         let mut shard_lengths = Vec::with_capacity(files_count);
         let mut shard_offsets = Vec::with_capacity(files_count + 1);
@@ -50,9 +58,7 @@ impl MmapStorage {
                     path: path.to_path_buf(),
                 })?;
 
-            // Optimize for sequential access over large files via OS huge pages
-            let _ = mmap.advise(memmap2::Advice::HugePage);
-
+            advice_set.apply(&mmap)?;
             let byte_len = mmap.len();
 
             // CRITICAL: Ensure binary layout matches 4-byte boundaries (u32/i32)
@@ -84,6 +90,7 @@ impl MmapStorage {
             shard_lengths,
             shard_offsets,
             total_size,
+            advice_set,
         })
     }
 

@@ -16,6 +16,12 @@ pub enum DataLoaderError {
         source: std::io::Error,
         path: PathBuf,
     },
+    #[error("Failed to apply memory advice {advice:?}")]
+    AdviseFailed {
+        #[source]
+        source: std::io::Error,
+        advice: memmap2::Advice,
+    },
 
     #[error(
         "File size ({size} bytes) is misaligned; must be a perfect multiple of 4 bytes. File: {path}"
