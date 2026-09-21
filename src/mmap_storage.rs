@@ -28,6 +28,9 @@ pub struct MmapStorage {
     /// Total logical elements across all shards combined.
     total_size: usize,
     advice_set: AdviceSet,
+
+    current_shard_idx: usize,
+    local_cursor: usize,
 }
 impl MmapStorage {
     pub fn load_data<P: AsRef<Path>>(
@@ -91,6 +94,8 @@ impl MmapStorage {
             shard_offsets,
             total_size,
             advice_set,
+            current_shard_idx: 0,
+            local_cursor: 0,
         })
     }
 
@@ -129,23 +134,18 @@ impl Storage for MmapStorage {
         }
     }
 
-    fn slice_sequential(
-        &self,
-        req_len: usize,
-        current_shard_idx: &mut usize,
-        local_cursor: &mut usize,
-    ) -> Option<Bytes> {
-        while *current_shard_idx < self.shards.len() {
-            let active_shard = &self.shards[*current_shard_idx];
+    fn slice_sequential(&mut self, req_len: usize) -> Option<Bytes> {
+        while self.current_shard_idx < self.shards.len() {
+            let active_shard = &self.shards[self.current_shard_idx];
 
-            if *local_cursor + req_len <= active_shard.len() {
-                let start = *local_cursor;
-                *local_cursor += req_len;
+            if self.local_cursor + req_len <= active_shard.len() {
+                let start = self.local_cursor;
+                self.local_cursor += req_len;
                 return Some(active_shard.slice(start..start + req_len));
             }
 
-            *current_shard_idx += 1;
-            *local_cursor = 0;
+            self.current_shard_idx += 1;
+            self.local_cursor = 0;
         }
 
         None

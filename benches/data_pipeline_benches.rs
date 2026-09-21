@@ -214,7 +214,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
                 let iter_storage = storage.clone();
 
                 // 3. Dataloader consumes the cloned storage, satisfying your API design
-                let dataloader = Dataloader::<MmapStorage, BytesConverter>::new(
+                let mut dataloader = Dataloader::<MmapStorage, BytesConverter>::new(
                     iter_storage,
                     context_window_elements,
                 );

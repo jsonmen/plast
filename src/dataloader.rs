@@ -22,14 +22,14 @@ impl<S: Storage, D: DataloaderType> Dataloader<S, D> {
             _marker: PhantomData,
         }
     }
-    pub fn iter(&self) -> DataloaderIter<'_, S, D> {
-        DataloaderIter::new(&self.storage, self.num_elements * BYTES_PER_TOKEN)
+    pub fn iter(&mut self) -> DataloaderIter<'_, S, D> {
+        DataloaderIter::new(&mut self.storage, self.num_elements * BYTES_PER_TOKEN)
     }
 
-    pub fn iter_bytes(&self) -> DataloaderIter<'_, S, BytesConverter> {
-        DataloaderIter::new(&self.storage, self.num_elements * BYTES_PER_TOKEN)
+    pub fn iter_bytes(&mut self) -> DataloaderIter<'_, S, BytesConverter> {
+        DataloaderIter::new(&mut self.storage, self.num_elements * BYTES_PER_TOKEN)
     }
-    pub fn iter_burn_bytes(&self) -> DataloaderIter<'_, S, BurnBytesConverter> {
-        DataloaderIter::new(&self.storage, self.num_elements * BYTES_PER_TOKEN)
+    pub fn iter_burn_bytes(&mut self) -> DataloaderIter<'_, S, BurnBytesConverter> {
+        DataloaderIter::new(&mut self.storage, self.num_elements * BYTES_PER_TOKEN)
     }
 }

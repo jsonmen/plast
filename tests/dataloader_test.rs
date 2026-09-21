@@ -123,30 +123,20 @@ mod tests {
         let shard1 = create_mock_shard(&[1, 2, 3, 4]); // 16 bytes
         let shard2 = create_mock_shard(&[5, 6, 7, 8]); // 16 bytes
 
-        let storage =
+        let mut storage =
             MmapStorage::load_data(vec![shard1.path(), shard2.path()], AdviceSet::default())
                 .unwrap();
 
-        let mut current_shard = 0;
-        let mut local_cursor = 0;
-
         // Fetch 8-byte chunk from shard 0
-        let slice1 = storage
-            .slice_sequential(8, &mut current_shard, &mut local_cursor)
-            .unwrap();
+        let slice1 = storage.slice_sequential(8).unwrap();
         assert_eq!(bytemuck::cast_slice::<u8, u32>(&slice1[..]), &[1, 2]);
 
         // Fetch next 8-byte chunk from shard 0
-        let slice2 = storage
-            .slice_sequential(8, &mut current_shard, &mut local_cursor)
-            .unwrap();
+        let slice2 = storage.slice_sequential(8).unwrap();
         assert_eq!(bytemuck::cast_slice::<u8, u32>(&slice2[..]), &[3, 4]);
 
         // Next fetch exceeds shard 0 -> rolls over to shard 1
-        let slice3 = storage
-            .slice_sequential(8, &mut current_shard, &mut local_cursor)
-            .unwrap();
-        assert_eq!(current_shard, 1);
+        let slice3 = storage.slice_sequential(8).unwrap();
         assert_eq!(bytemuck::cast_slice::<u8, u32>(&slice3[..]), &[5, 6]);
     }
 
@@ -164,7 +154,7 @@ mod tests {
                 .unwrap();
 
         // Request 2 elements per chunk (8 bytes)
-        let loader = Dataloader::<MmapStorage, BytesConverter>::new(storage, 2);
+        let mut loader = Dataloader::<MmapStorage, BytesConverter>::new(storage, 2);
         let mut iter = loader.iter_bytes();
 
         let chunk1 = iter.next().unwrap();
@@ -198,7 +188,7 @@ mod tests {
         let shard = create_mock_shard(&[1, 2, 3, 4]);
         let storage = MmapStorage::load_data(vec![shard.path()], AdviceSet::default()).unwrap();
 
-        let loader = Dataloader::<MmapStorage, U32VecConverter>::new(storage, 2);
+        let mut loader = Dataloader::<MmapStorage, U32VecConverter>::new(storage, 2);
         let mut iter = loader.iter();
 
         let res: Vec<u32> = iter.next().unwrap();
@@ -213,7 +203,7 @@ mod tests {
         let shard = create_mock_shard(&[10, 20, 30, 40]);
         let storage = MmapStorage::load_data(vec![shard.path()], AdviceSet::default()).unwrap();
 
-        let loader = Dataloader::<MmapStorage, BurnBytesConverter>::new(storage, 2);
+        let mut loader = Dataloader::<MmapStorage, BurnBytesConverter>::new(storage, 2);
         let mut iter = loader.iter_burn_bytes();
 
         let burn_bytes = iter.next().unwrap();

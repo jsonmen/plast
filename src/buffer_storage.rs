@@ -1,10 +1,9 @@
 use crate::errors::DataLoaderError;
-use crate::storage::Storage;
+//use crate::storage::Storage;
 use bytes::Bytes;
 use crossbeam_channel::{Receiver, bounded};
 use memmap2::{Advice, MmapOptions};
 use std::fs::{self, File};
-use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
 
