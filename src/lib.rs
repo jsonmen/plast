@@ -1,4 +1,5 @@
 pub mod advice_set;
+pub mod buffer_storage;
 pub mod dataloader;
 pub mod datatypes;
 pub mod errors;
@@ -10,6 +11,7 @@ pub mod storage;
 pub mod utils;
 
 pub use advice_set::AdviceSet;
+pub use buffer_storage::BufferStorage;
 pub use dataloader::Dataloader;
 #[cfg(feature = "burn")]
 pub use datatypes::BurnBytesConverter;

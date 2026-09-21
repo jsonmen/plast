@@ -22,6 +22,12 @@ pub enum DataLoaderError {
         source: std::io::Error,
         advice: memmap2::Advice,
     },
+    #[error("Failed to read file metadata at path: {path}")]
+    ReadMetaDataFailed {
+        #[source]
+        source: std::io::Error,
+        path: PathBuf,
+    },
 
     #[error(
         "File size ({size} bytes) is misaligned; must be a perfect multiple of 4 bytes. File: {path}"
