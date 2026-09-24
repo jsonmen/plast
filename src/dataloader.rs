@@ -22,6 +22,9 @@ impl<S: Storage, D: DataloaderType> Dataloader<S, D> {
             _marker: PhantomData,
         }
     }
+    pub fn clear_state(&mut self) -> () {
+        self.storage.clear_state();
+    }
     pub fn iter(&mut self) -> DataloaderIter<'_, S, D> {
         DataloaderIter::new(&mut self.storage, self.num_elements * BYTES_PER_TOKEN)
     }
