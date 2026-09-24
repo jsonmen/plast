@@ -115,6 +115,10 @@ impl Storage for MmapStorage {
     fn len(&self) -> usize {
         self.total_size
     }
+    fn clear_state(&mut self) -> () {
+        self.local_cursor = 0;
+        self.current_shard_idx = 0;
+    }
 
     fn slice_random(&self, range: Range<usize>) -> Option<Bytes> {
         let req_len = range.end - range.start;
