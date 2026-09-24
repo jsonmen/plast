@@ -1,17 +1,20 @@
 use crate::errors::DataLoaderError;
-//use crate::storage::Storage;
+use crate::storage::Storage;
 use bytes::Bytes;
 use crossbeam_channel::{Receiver, bounded};
 use memmap2::{Advice, MmapOptions};
 use std::fs::{self, File};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
 
 pub struct BufferStorage {
     rx: Receiver<Bytes>,
-    worker_handle: Option<JoinHandle<()>>,
+    _worker_handle: Option<JoinHandle<()>>,
     active_buffer: Option<Bytes>,
-    shard_offsets: Vec<usize>,
+    total_shard_count: usize,
+    current_shard_idx: usize,
+    local_cursor: usize,
     total_size: usize,
 }
 impl BufferStorage {
@@ -19,8 +22,8 @@ impl BufferStorage {
         data_files: Vec<P>,
         buffer_size: usize,
     ) -> Result<Self, DataLoaderError> {
-        let mut shard_offsets = Vec::with_capacity(data_files.len());
         let mut total_size: usize = 0;
+        let total_shard_count = data_files.len();
 
         let path_bufs: Vec<PathBuf> = data_files
             .iter()
@@ -28,7 +31,6 @@ impl BufferStorage {
             .collect();
 
         for path in &path_bufs {
-            shard_offsets.push(total_size);
             let file_len = fs::metadata(path)
                 .map_err(|e| DataLoaderError::ShardOpenFailed {
                     source: e,
@@ -56,10 +58,40 @@ impl BufferStorage {
 
         Ok(Self {
             rx,
-            worker_handle: Some(worker_handle),
+            _worker_handle: Some(worker_handle),
             active_buffer: None,
-            shard_offsets,
+            total_shard_count,
+            current_shard_idx: 0,
+            local_cursor: 0,
             total_size,
         })
+    }
+}
+
+impl Storage for BufferStorage {
+    fn len(&self) -> usize {
+        self.total_size
+    }
+    fn slice_sequential(&mut self, req_len: usize) -> Option<Bytes> {
+        while self.current_shard_idx <= self.total_shard_count {
+            if let Some(active_buffer) = &self.active_buffer {
+                if self.local_cursor + req_len <= active_buffer.len() {
+                    let start = self.local_cursor;
+                    self.local_cursor += req_len;
+                    return Some(active_buffer.slice(start..start + req_len));
+                }
+            }
+            if let Ok(next_buffer) = self.rx.recv() {
+                self.active_buffer = Some(next_buffer);
+                self.current_shard_idx += 1;
+                self.local_cursor = 0;
+            } else {
+                return None;
+            }
+        }
+        None
+    }
+    fn slice_random(&self, _range: Range<usize>) -> Option<Bytes> {
+        None // Can't be implemented
     }
 }
