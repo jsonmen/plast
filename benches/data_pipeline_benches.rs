@@ -111,7 +111,19 @@ fn bench_pretokenizer(c: &mut Criterion) {
 
     group.finish();
 }
+fn page_align_mmap_range(ptr: *const u8, len: usize) -> (*mut std::ffi::c_void, usize) {
+    let page_size = 4096; // Standard 4 KiB Linux page size
+    let addr = ptr as usize;
 
+    // Align start pointer DOWN to the nearest 4 KiB boundary
+    let aligned_addr = addr & !(page_size - 1);
+    let start_offset = addr - aligned_addr;
+
+    // Align total length UP to cover the full span, but only to 4 KiB increments
+    let aligned_len = (len + start_offset + page_size - 1) & !(page_size - 1);
+
+    (aligned_addr as *mut std::ffi::c_void, aligned_len)
+}
 /// 2. BENCHMARK: H2D Bus Saturation & Kernel execution tracking
 fn bench_gpu_saturation(c: &mut Criterion) {
     let tokenizer = create_mock_tokenizer();
@@ -201,20 +213,45 @@ fn bench_gpu_saturation(c: &mut Criterion) {
 
     // --- Strategy B: Sequential Zero-Copy Streaming ---
     group.bench_function("H2D_Transfer_Plus_Reduction_DataloaderIter", |b| {
-        // 1. Create storage ONCE outside the timing loop
-        let storage = MmapStorage::load_data(paths.clone(), AdviceSet::default()).unwrap();
+        let storage = MmapStorage::load_data_mut(paths.clone(), AdviceSet::default()).unwrap();
+
+        let mut registered_ptrs = std::collections::HashSet::new();
+
+        for (idx, shard) in storage.shards().enumerate() {
+            if shard.is_empty() {
+                continue;
+            }
+
+            let ptr = shard.as_ptr() as *mut std::ffi::c_void;
+            let len = shard.len();
+
+            // Verify pointer is page aligned (4096 bytes)
+            let page_size = 4096;
+            let addr = ptr as usize;
+            let offset = addr % page_size;
+
+            // Adjust pointer DOWN to page start, and adjust len UP by offset
+            // BUT DO NOT extend past the exact end of mapped pages!
+            let aligned_ptr = (addr - offset) as *mut std::ffi::c_void;
+
+            // Exact mapped length: using exact `len` avoids overshooting file bounds
+            let safe_len = len;
+
+            if registered_ptrs.insert(aligned_ptr) {
+                unsafe {
+                    // Include READ_ONLY flag if your mmap files are read-only
+                    let flags = cudarc::driver::sys::CU_MEMHOSTREGISTER_PORTABLE;
+
+                    let res =
+                        cudarc::driver::sys::cuMemHostRegister_v2(aligned_ptr, safe_len, flags);
+                }
+            }
+        }
 
         b.iter_custom(|iters| {
             let start = Instant::now();
-
             for _ in 0..iters {
-                // 2. Clone the storage for this iteration.
-                // Because MmapStorage uses `bytes::Bytes` (an Arc under the hood),
-                // this clone is O(1) and only bumps an atomic refcount.
-                // It DOES NOT create a new OS mmap, avoiding TLB thrashing.
                 let iter_storage = storage.clone();
-
-                // 3. Dataloader consumes the cloned storage, satisfying your API design
                 let mut dataloader = Dataloader::<MmapStorage, BytesConverter>::new(
                     iter_storage,
                     context_window_elements,
@@ -226,11 +263,12 @@ fn bench_gpu_saturation(c: &mut Criterion) {
 
                     unsafe {
                         let (src, _record_src) = gpu_vec.device_ptr(&stream);
-                        let _ = cudarc::driver::result::memcpy_htod_async(
+                        cudarc::driver::result::memcpy_htod_async(
                             src,
                             raw_tokens,
                             stream.cu_stream(),
-                        );
+                        )
+                        .unwrap();
                     };
 
                     let threads_per_block = 256;
@@ -240,18 +278,27 @@ fn bench_gpu_saturation(c: &mut Criterion) {
                         block_dim: (threads_per_block as u32, 1, 1),
                         shared_mem_bytes: 0,
                     };
+                    let num = n as i32;
                     let mut launch_args = stream.launch_builder(&f);
                     launch_args.arg(&gpu_vec);
                     launch_args.arg(&mut dev_sum);
-                    launch_args.arg(&n);
+                    launch_args.arg(&num);
 
                     unsafe { launch_args.launch(cfg) }.unwrap();
                 }
             }
-            ctx.synchronize().unwrap();
 
+            ctx.synchronize().unwrap();
             start.elapsed()
         });
+
+        // --- UNREGISTER ALL SHARDS ---
+        for shard in storage.shards() {
+            unsafe {
+                let ptr = shard.as_ptr() as *mut std::ffi::c_void;
+                cudarc::driver::sys::cuMemHostUnregister(ptr).result().ok();
+            }
+        }
     });
 
     group.finish();
