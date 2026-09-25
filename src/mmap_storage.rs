@@ -1,20 +1,8 @@
-use crate::advice_set::AdviceSet;
 use crate::errors::DataLoaderError;
+use crate::mmap_setup::MmapSetup;
 use crate::storage::Storage;
 use bytes::Bytes;
-use memmap2::{Mmap, MmapMut};
-use std::fs::{File, OpenOptions};
 use std::ops::Range;
-use std::path::Path;
-use std::sync::Arc;
-#[derive(Clone)]
-struct MmapOwner(Arc<Mmap>);
-
-impl AsRef<[u8]> for MmapOwner {
-    fn as_ref(&self) -> &[u8] {
-        &self.0[..]
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MmapStorage {
@@ -27,18 +15,14 @@ pub struct MmapStorage {
     shard_offsets: Vec<usize>,
     /// Total logical elements across all shards combined.
     total_size: usize,
-    advice_set: AdviceSet,
 
     current_shard_idx: usize,
     local_cursor: usize,
 }
 impl MmapStorage {
-    pub fn load_data<P: AsRef<Path>>(
-        data_files: Vec<P>,
-        advice_set: impl Into<AdviceSet>,
-    ) -> Result<Self, DataLoaderError> {
+    pub fn load_data(mmap_setup: MmapSetup) -> Result<Self, DataLoaderError> {
+        let data_files = mmap_setup.data_files();
         let files_count = data_files.len();
-        let advice_set = advice_set.into();
         let mut shards = Vec::with_capacity(files_count);
         let mut shard_lengths = Vec::with_capacity(files_count);
         let mut shard_offsets = Vec::with_capacity(files_count + 1);
@@ -46,92 +30,24 @@ impl MmapStorage {
         let mut total_size = 0;
         let mut current_byte_offset = 0;
 
-        for path_ref in data_files {
-            let path = path_ref.as_ref();
-            let f = File::open(path).map_err(|e| DataLoaderError::ShardOpenFailed {
-                source: e,
-                path: path.to_path_buf(),
+        for path in data_files {
+            let f = mmap_setup.open_options().open(&path).map_err(|e| {
+                DataLoaderError::ShardOpenFailed {
+                    source: e,
+                    path: path.to_path_buf(),
+                }
             })?;
 
             // SAFETY: Memory mapping is inherently unsafe because the underlying file
             // can be modified externally, causing undefined behavior in the process.
-            let mmap =
-                unsafe { Mmap::map(&f) }.map_err(|e| DataLoaderError::MemoryMappingFailed {
-                    source: e,
-                    path: path.to_path_buf(),
-                })?;
-
-            advice_set.apply(&mmap)?;
-            let byte_len = mmap.len();
-
-            // CRITICAL: Ensure binary layout matches 4-byte boundaries (u32/i32)
-            if byte_len % 4 != 0 {
-                return Err(DataLoaderError::InvalidByteAlignment {
-                    size: byte_len,
-                    path: path.to_path_buf(),
-                });
-            }
-
-            let num_elements = byte_len / 4;
-
-            shard_offsets.push(current_byte_offset);
-            current_byte_offset += byte_len;
-
-            total_size += num_elements;
-            shard_lengths.push(num_elements);
-            let owner = MmapOwner(Arc::new(mmap));
-
-            let bytes = Bytes::from_owner(owner);
-            shards.push(bytes);
-        }
-
-        // Push final terminal boundary for the binary search interval math
-        shard_offsets.push(current_byte_offset);
-
-        Ok(Self {
-            shards,
-            shard_lengths,
-            shard_offsets,
-            total_size,
-            advice_set,
-            current_shard_idx: 0,
-            local_cursor: 0,
-        })
-    }
-    pub fn load_data_mut<P: AsRef<Path>>(
-        data_files: Vec<P>,
-        advice_set: impl Into<AdviceSet>,
-    ) -> Result<Self, DataLoaderError> {
-        let files_count = data_files.len();
-        let advice_set = advice_set.into();
-        let mut shards = Vec::with_capacity(files_count);
-        let mut shard_lengths = Vec::with_capacity(files_count);
-        let mut shard_offsets = Vec::with_capacity(files_count + 1);
-
-        let mut total_size = 0;
-        let mut current_byte_offset = 0;
-
-        for path_ref in data_files {
-            let path = path_ref.as_ref();
-            let f = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(path)
-                .map_err(|e| DataLoaderError::ShardOpenFailed {
-                    source: e,
-                    path: path.to_path_buf(),
-                })?;
-
-            // SAFETY: Memory mapping is inherently unsafe because the underlying file
-            // can be modified externally, causing undefined behavior in the process.
-            let mmap = unsafe { MmapMut::map_mut(&f) }.map_err(|e| {
+            let mmap = unsafe { mmap_setup.mmap_options().map(&f) }.map_err(|e| {
                 DataLoaderError::MemoryMappingFailed {
                     source: e,
                     path: path.to_path_buf(),
                 }
             })?;
 
-            advice_set.apply_mut(&mmap)?;
+            mmap_setup.advice_set().apply(&mmap)?;
             let byte_len = mmap.len();
 
             // CRITICAL: Ensure binary layout matches 4-byte boundaries (u32/i32)
@@ -162,7 +78,68 @@ impl MmapStorage {
             shard_lengths,
             shard_offsets,
             total_size,
-            advice_set,
+            current_shard_idx: 0,
+            local_cursor: 0,
+        })
+    }
+    pub fn load_data_mut(mmap_setup: MmapSetup) -> Result<Self, DataLoaderError> {
+        let data_files = mmap_setup.data_files();
+        let files_count = data_files.len();
+        let mut shards = Vec::with_capacity(files_count);
+        let mut shard_lengths = Vec::with_capacity(files_count);
+        let mut shard_offsets = Vec::with_capacity(files_count + 1);
+
+        let mut total_size = 0;
+        let mut current_byte_offset = 0;
+
+        for path in data_files {
+            let f = mmap_setup.open_options().open(&path).map_err(|e| {
+                DataLoaderError::ShardOpenFailed {
+                    source: e,
+                    path: path.to_path_buf(),
+                }
+            })?;
+
+            // SAFETY: Memory mapping is inherently unsafe because the underlying file
+            // can be modified externally, causing undefined behavior in the process.
+            let mmap = unsafe { mmap_setup.mmap_options().map_mut(&f) }.map_err(|e| {
+                DataLoaderError::MemoryMappingFailed {
+                    source: e,
+                    path: path.to_path_buf(),
+                }
+            })?;
+
+            mmap_setup.advice_set().apply_mut(&mmap)?;
+            let byte_len = mmap.len();
+
+            // CRITICAL: Ensure binary layout matches 4-byte boundaries (u32/i32)
+            if byte_len % 4 != 0 {
+                return Err(DataLoaderError::InvalidByteAlignment {
+                    size: byte_len,
+                    path: path.to_path_buf(),
+                });
+            }
+
+            let num_elements = byte_len / 4;
+
+            shard_offsets.push(current_byte_offset);
+            current_byte_offset += byte_len;
+
+            total_size += num_elements;
+            shard_lengths.push(num_elements);
+
+            let bytes = Bytes::from_owner(mmap);
+            shards.push(bytes);
+        }
+
+        // Push final terminal boundary for the binary search interval math
+        shard_offsets.push(current_byte_offset);
+
+        Ok(Self {
+            shards,
+            shard_lengths,
+            shard_offsets,
+            total_size,
             current_shard_idx: 0,
             local_cursor: 0,
         })

@@ -4,6 +4,7 @@ pub mod dataloader;
 pub mod datatypes;
 pub mod errors;
 pub mod iterators;
+pub mod mmap_setup;
 pub mod mmap_storage;
 pub mod pretokenizer;
 pub mod shard_loader;
@@ -16,6 +17,7 @@ pub use dataloader::Dataloader;
 #[cfg(feature = "burn")]
 pub use datatypes::BurnBytesConverter;
 pub use datatypes::{BytesConverter, DataloaderType};
+pub use mmap_setup::MmapSetup;
 pub use mmap_storage::MmapStorage;
 pub use pretokenizer::pretokenize_dataset;
 pub use shard_loader::ShardLoader;

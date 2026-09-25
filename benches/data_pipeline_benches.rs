@@ -1,8 +1,8 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use plast::AdviceSet;
 use plast::BufferStorage;
 use plast::dataloader::{BYTES_PER_TOKEN, Dataloader};
 use plast::datatypes::BytesConverter;
+use plast::mmap_setup::MmapSetup;
 use plast::mmap_storage::MmapStorage;
 use plast::pretokenize_dataset;
 use plast::storage::Storage;
@@ -111,19 +111,7 @@ fn bench_pretokenizer(c: &mut Criterion) {
 
     group.finish();
 }
-fn page_align_mmap_range(ptr: *const u8, len: usize) -> (*mut std::ffi::c_void, usize) {
-    let page_size = 4096; // Standard 4 KiB Linux page size
-    let addr = ptr as usize;
 
-    // Align start pointer DOWN to the nearest 4 KiB boundary
-    let aligned_addr = addr & !(page_size - 1);
-    let start_offset = addr - aligned_addr;
-
-    // Align total length UP to cover the full span, but only to 4 KiB increments
-    let aligned_len = (len + start_offset + page_size - 1) & !(page_size - 1);
-
-    (aligned_addr as *mut std::ffi::c_void, aligned_len)
-}
 /// 2. BENCHMARK: H2D Bus Saturation & Kernel execution tracking
 fn bench_gpu_saturation(c: &mut Criterion) {
     let tokenizer = create_mock_tokenizer();
@@ -140,7 +128,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     )
     .unwrap();
 
-    let temp_storage = MmapStorage::load_data(paths.clone(), AdviceSet::default()).unwrap();
+    let temp_storage = MmapStorage::load_data(MmapSetup::new(paths.clone())).unwrap();
     let total_elements = temp_storage.total_size();
     let total_bytes = total_elements * BYTES_PER_TOKEN;
     drop(temp_storage);
@@ -165,7 +153,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
     // --- Strategy A: Random-Access Batching ---
     group.bench_function("H2D_Transfer_Plus_Reduction_SliceRandom", |b| {
         // 1. Create storage ONCE outside the timing loop
-        let storage = MmapStorage::load_data(paths.clone(), AdviceSet::default()).unwrap();
+        let storage = MmapStorage::load_data(MmapSetup::new(paths.clone())).unwrap();
 
         b.iter_custom(|iters| {
             let start = Instant::now();
@@ -213,11 +201,12 @@ fn bench_gpu_saturation(c: &mut Criterion) {
 
     // --- Strategy B: Sequential Zero-Copy Streaming ---
     group.bench_function("H2D_Transfer_Plus_Reduction_DataloaderIter", |b| {
-        let storage = MmapStorage::load_data_mut(paths.clone(), AdviceSet::default()).unwrap();
+        let storage =
+            MmapStorage::load_data_mut(MmapSetup::new(paths.clone()).read_write()).unwrap();
 
         let mut registered_ptrs = std::collections::HashSet::new();
 
-        for (idx, shard) in storage.shards().enumerate() {
+        for shard in storage.shards() {
             if shard.is_empty() {
                 continue;
             }
@@ -242,8 +231,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
                     // Include READ_ONLY flag if your mmap files are read-only
                     let flags = cudarc::driver::sys::CU_MEMHOSTREGISTER_PORTABLE;
 
-                    let res =
-                        cudarc::driver::sys::cuMemHostRegister_v2(aligned_ptr, safe_len, flags);
+                    let _ = cudarc::driver::sys::cuMemHostRegister_v2(aligned_ptr, safe_len, flags);
                 }
             }
         }

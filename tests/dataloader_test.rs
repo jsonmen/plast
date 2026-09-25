@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use plast::AdviceSet;
     use plast::dataloader::Dataloader;
     use plast::datatypes::{BytesConverter, DataloaderType};
+    use plast::mmap_setup::MmapSetup;
     use plast::mmap_storage::MmapStorage;
     use plast::storage::Storage;
     use std::io::Write;
@@ -30,8 +30,8 @@ mod tests {
         let file1 = create_mock_shard(&shard1_data);
         let file2 = create_mock_shard(&shard2_data);
 
-        let paths = vec![file1.path().to_path_buf(), file2.path().to_path_buf()];
-        let storage = MmapStorage::load_data(paths, AdviceSet::default()).unwrap();
+        let paths = vec![file1.path(), file2.path()];
+        let storage = MmapStorage::load_data(MmapSetup::new(paths)).unwrap();
 
         assert_eq!(storage.total_size(), 10);
         assert_eq!(storage.len(), 10);
@@ -44,8 +44,8 @@ mod tests {
         tmp_file.write_all(&[1u8, 2, 3]).unwrap(); // 3 bytes (Not 4-byte aligned)
         tmp_file.flush().unwrap();
 
-        let paths = vec![tmp_file.path().to_path_buf()];
-        let result = MmapStorage::load_data(paths, AdviceSet::default());
+        let paths = vec![tmp_file.path()];
+        let result = MmapStorage::load_data(MmapSetup::new(paths));
 
         assert!(result.is_err());
     }
@@ -60,8 +60,7 @@ mod tests {
         let shard2 = create_mock_shard(&[50, 60, 70]); // 12 bytes (offsets 16..28)
 
         let storage =
-            MmapStorage::load_data(vec![shard1.path(), shard2.path()], AdviceSet::default())
-                .unwrap();
+            MmapStorage::load_data(MmapSetup::new(vec![shard1.path(), shard2.path()])).unwrap();
 
         // Shard 0 start
         assert_eq!(storage.locate(0), (0, 0));
@@ -82,7 +81,7 @@ mod tests {
         let shard1_data = vec![100u32, 200, 300, 400]; // 16 bytes
         let file1 = create_mock_shard(&shard1_data);
 
-        let storage = MmapStorage::load_data(vec![file1.path()], AdviceSet::default()).unwrap();
+        let storage = MmapStorage::load_data(MmapSetup::new(vec![file1.path()])).unwrap();
 
         // Slice first 2 u32 tokens (8 bytes)
         let bytes = storage.slice_random(0..8).unwrap();
@@ -106,8 +105,7 @@ mod tests {
         let shard2 = create_mock_shard(&[3, 4]); // 8 bytes
 
         let storage =
-            MmapStorage::load_data(vec![shard1.path(), shard2.path()], AdviceSet::default())
-                .unwrap();
+            MmapStorage::load_data(MmapSetup::new(vec![shard1.path(), shard2.path()])).unwrap();
 
         // Request starting in Shard 0 (byte 4) and extending 8 bytes into Shard 1
         // Straddles boundary (local_offset 4 + req_len 8 > shard 0 length 8)
@@ -124,8 +122,7 @@ mod tests {
         let shard2 = create_mock_shard(&[5, 6, 7, 8]); // 16 bytes
 
         let mut storage =
-            MmapStorage::load_data(vec![shard1.path(), shard2.path()], AdviceSet::default())
-                .unwrap();
+            MmapStorage::load_data(MmapSetup::new(vec![shard1.path(), shard2.path()])).unwrap();
 
         // Fetch 8-byte chunk from shard 0
         let slice1 = storage.slice_sequential(8).unwrap();
@@ -150,8 +147,7 @@ mod tests {
         let shard2 = create_mock_shard(&[50, 60, 70, 80]);
 
         let storage =
-            MmapStorage::load_data(vec![shard1.path(), shard2.path()], AdviceSet::default())
-                .unwrap();
+            MmapStorage::load_data(MmapSetup::new(vec![shard1.path(), shard2.path()])).unwrap();
 
         // Request 2 elements per chunk (8 bytes)
         let mut loader = Dataloader::<MmapStorage, BytesConverter>::new(storage, 2);
@@ -186,7 +182,7 @@ mod tests {
         }
 
         let shard = create_mock_shard(&[1, 2, 3, 4]);
-        let storage = MmapStorage::load_data(vec![shard.path()], AdviceSet::default()).unwrap();
+        let storage = MmapStorage::load_data(MmapSetup::new(vec![shard.path()])).unwrap();
 
         let mut loader = Dataloader::<MmapStorage, U32VecConverter>::new(storage, 2);
         let mut iter = loader.iter();
@@ -201,7 +197,7 @@ mod tests {
         use plast::datatypes::BurnBytesConverter;
 
         let shard = create_mock_shard(&[10, 20, 30, 40]);
-        let storage = MmapStorage::load_data(vec![shard.path()], AdviceSet::default()).unwrap();
+        let storage = MmapStorage::load_data(MmapSetup::new(vec![shard.path()])).unwrap();
 
         let mut loader = Dataloader::<MmapStorage, BurnBytesConverter>::new(storage, 2);
         let mut iter = loader.iter_burn_bytes();
