@@ -1,5 +1,5 @@
 use crate::errors::DataLoaderError;
-use memmap2::{Advice, Mmap};
+use memmap2::{Advice, Mmap, MmapMut};
 
 /// A collection of memory advice hints to be applied to a memory-mapped file.
 ///
@@ -58,6 +58,16 @@ impl AdviceSet {
     /// Returns a `DataLoaderError::AdviseFailed` if the operating system
     /// rejects any of the provided hints (e.g., using `HugePage` on macOS).
     pub fn apply(&self, mmap: &Mmap) -> Result<(), DataLoaderError> {
+        for &advice in &self.advice {
+            mmap.advise(advice).map_err(|source| {
+                // Map the io::Error to your custom DataLoaderError
+                DataLoaderError::AdviseFailed { source, advice }
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn apply_mut(&self, mmap: &MmapMut) -> Result<(), DataLoaderError> {
         for &advice in &self.advice {
             mmap.advise(advice).map_err(|source| {
                 // Map the io::Error to your custom DataLoaderError
