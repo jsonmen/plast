@@ -1,25 +1,26 @@
-pub mod advice_set;
-pub mod buffer_storage;
+#[cfg(feature = "dataloader")]
 pub mod dataloader;
-pub mod datatypes;
-pub mod errors;
-pub mod iterators;
-pub mod mmap_setup;
-pub mod mmap_storage;
+#[cfg(feature = "pretokenizer")]
 pub mod pretokenizer;
-pub mod shard_loader;
 pub mod storage;
-pub mod utils;
 
-pub use advice_set::AdviceSet;
-pub use buffer_storage::BufferStorage;
-pub use dataloader::Dataloader;
-#[cfg(feature = "burn")]
-pub use datatypes::BurnBytesConverter;
-pub use datatypes::{BytesConverter, DataloaderType};
-pub use mmap_setup::MmapSetup;
-pub use mmap_storage::MmapStorage;
-pub use pretokenizer::pretokenize_dataset;
-pub use shard_loader::ShardLoader;
+// Always available core traits/structs
 pub use storage::Storage;
-pub use utils::{fetch_arrow_files, fetch_bin_files};
+
+// Dataloader feature re-exports
+#[cfg(feature = "dataloader")]
+pub use dataloader::{BytesConverter, Dataloader, DataloaderType};
+
+#[cfg(all(feature = "dataloader", feature = "burn"))]
+pub use dataloader::BurnBytesConverter;
+
+// Pretokenizer feature re-exports
+#[cfg(feature = "pretokenizer")]
+pub use pretokenizer::{ShardLoader, pretokenize_dataset, utils};
+
+// Storage feature re-exports
+#[cfg(feature = "experimental-buffer-storage")]
+pub use storage::BufferStorage;
+
+#[cfg(feature = "mmap-storage")]
+pub use storage::{AdviceSet, MmapSetup, MmapStorage};

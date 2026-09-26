@@ -1,8 +1,8 @@
-use crate::{
+use super::{
     datatypes::{BurnBytesConverter, BytesConverter, DataloaderType},
     iterators::DataloaderIter,
-    storage::Storage,
 };
+use crate::storage::Storage;
 use std::marker::PhantomData;
 
 pub const BYTES_PER_TOKEN: usize = 4;

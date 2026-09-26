@@ -1,11 +1,6 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use plast::BufferStorage;
-use plast::dataloader::{BYTES_PER_TOKEN, Dataloader};
-use plast::datatypes::BytesConverter;
-use plast::mmap_setup::MmapSetup;
-use plast::mmap_storage::MmapStorage;
-use plast::pretokenize_dataset;
-use plast::storage::Storage;
+use plast::dataloader::{BYTES_PER_TOKEN, BytesConverter, Dataloader};
+use plast::{BufferStorage, MmapSetup, MmapStorage, Storage, pretokenize_dataset};
 use polars::prelude::*;
 use std::io::Write;
 use std::time::Instant;

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use plast::shard_loader::ShardLoader; // Adjusted to absolute module routing path
+    use plast::pretokenizer::ShardLoader; // or use plast::ShardLoader;
     use polars::prelude::*;
     use std::io::{Seek, SeekFrom, Write};
     use tempfile::NamedTempFile;
@@ -143,7 +143,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(plast::errors::ShardLoaderError::UnsupportedExtension { .. })
+            Err(plast::pretokenizer::ShardLoaderError::UnsupportedExtension { .. })
         ));
     }
 
@@ -157,7 +157,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(plast::errors::ShardLoaderError::ColumnMissing { .. })
+            Err(plast::pretokenizer::ShardLoaderError::ColumnMissing { .. })
         ));
     }
 }

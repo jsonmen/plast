@@ -12,21 +12,53 @@ name = "data_pipeline_benches"
 harness = false
 
 [features]
-default = ["burn"]
-burn = ["dep:burn-tensor"]
+dataloader = []
+
+pretokenizer = [
+    "dep:tokenizers",
+    "dep:crossbeam-channel",
+    "dep:rayon",
+    "dep:bytemuck",
+    "dep:log",
+    "dep:polars",
+]
+
+mmap-storage = [
+    "dep:memmap2",
+]
+
+experimental-buffer-storage = [
+    "dep:crossbeam-channel",
+    "dep:memmap2",
+]
+
+burn = [
+    "dataloader",
+    "dep:burn-tensor",
+]
+
+full = [
+    "dataloader",
+    "pretokenizer",
+    "mmap-storage",
+    "experimental-buffer-storage",
+    "burn",
+]
 
 [dependencies]
-bytemuck = "1.25.0"
-crossbeam-channel = "0.5.15"
-memmap2 = "0.9.10"
-# Rayon, lazy processing, and fast string conversions are fully encapsulated here
-polars = { version = "0.54.2", features = ["lazy", "strings", "ipc", "parquet", "ipc_streaming", "performant", "json", "csv"] }
-rayon = "1.12.0"
-tokenizers = "0.23.1"
-thiserror = "2.0.18"
-log = "0.4.32"
+# --- Core Always-Required Dependencies ---
 bytes = "1.12.1"
-burn-tensor = {version = "0.21.0", optional = true}
+thiserror = "2.0.18"
+
+# --- Feature-Gated Optional Dependencies ---
+burn-tensor = { version = "0.21.0", optional = true }
+bytemuck = { version = "1.25.0", optional = true }
+crossbeam-channel = { version = "0.5.15", optional = true }
+log = { version = "0.4.32", optional = true }
+memmap2 = { version = "0.9.10", optional = true }
+polars = { version = "0.54.2", optional = true, features = ["lazy", "strings", "ipc", "parquet", "ipc_streaming", "performant", "json", "csv"] }
+rayon = { version = "1.12.0", optional = true }
+tokenizers = { version = "0.23.1", optional = true }
 
 [dev-dependencies]
 criterion = "0.8.2"
@@ -43,3 +75,7 @@ panic = "abort"
 [profile.dev.package."*"]
 opt-level = 2
 debug = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

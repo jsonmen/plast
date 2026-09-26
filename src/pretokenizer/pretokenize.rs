@@ -1,4 +1,4 @@
-use crate::errors::{PretokenizerError, ShardLoaderError};
+use super::error::{PretokenizerError, ShardLoaderError};
 use crossbeam_channel::bounded;
 use polars::datatypes::StringChunked;
 use rayon::prelude::ParallelIterator;

@@ -1,8 +1,9 @@
-use crate::advice_set::AdviceSet;
+use super::advice_set::AdviceSet;
 use memmap2::MmapOptions;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug)]
 pub struct MmapSetup {
     data_files: Vec<PathBuf>,
     open_options: OpenOptions,

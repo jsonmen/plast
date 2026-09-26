@@ -1,11 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use plast::pretokenizer::pretokenize_dataset;
+    use plast::pretokenize_dataset; // or use plast::pretokenizer::pretokenize_dataset;
     use std::io::Write;
     use std::path::Path;
     use tempfile::NamedTempFile;
     use tokenizers::Tokenizer;
-
     fn create_mock_tokenizer() -> Tokenizer {
         // Look up the file relative to this test file's directory
         let large_json_data = include_str!("../fixtures/mock_tokenizer.json");

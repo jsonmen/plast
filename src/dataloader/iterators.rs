@@ -1,4 +1,5 @@
-use crate::{datatypes::DataloaderType, storage::Storage};
+use super::datatypes::DataloaderType;
+use crate::storage::Storage;
 use std::marker::PhantomData;
 
 #[derive(Debug, PartialEq, Eq)]

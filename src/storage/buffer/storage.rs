@@ -1,4 +1,4 @@
-use crate::errors::DataLoaderError;
+use super::super::error::DataLoaderError;
 use crate::storage::Storage;
 use bytes::Bytes;
 use crossbeam_channel::{Receiver, bounded};

@@ -3,7 +3,6 @@ mod tests {
     use plast::{BufferStorage, Storage};
     use std::io::Write;
     use tempfile::NamedTempFile;
-
     /// Helper function to create temporary valid mock files filled with 4-byte tokens.
     fn create_mock_shard(data: &[u32]) -> NamedTempFile {
         let mut tmp_file = NamedTempFile::new().unwrap();

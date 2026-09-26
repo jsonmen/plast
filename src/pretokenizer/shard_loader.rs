@@ -1,4 +1,4 @@
-use crate::errors::ShardLoaderError;
+use super::error::ShardLoaderError;
 use polars::prelude::*;
 use std::path::{Path, PathBuf};
 

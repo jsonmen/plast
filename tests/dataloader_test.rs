@@ -1,14 +1,11 @@
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use plast::dataloader::Dataloader;
-    use plast::datatypes::{BytesConverter, DataloaderType};
-    use plast::mmap_setup::MmapSetup;
-    use plast::mmap_storage::MmapStorage;
-    use plast::storage::Storage;
+    use plast::{
+        BytesConverter, DataloaderType, MmapSetup, MmapStorage, Storage, dataloader::Dataloader,
+    };
     use std::io::Write;
     use tempfile::NamedTempFile;
-
     /// Helper function to create temporary valid mock files filled with 4-byte tokens.
     fn create_mock_shard(data: &[u32]) -> NamedTempFile {
         let mut tmp_file = NamedTempFile::new().unwrap();
@@ -194,7 +191,7 @@ mod tests {
     #[cfg(feature = "burn")]
     #[test]
     fn test_burn_bytes_converter() {
-        use plast::datatypes::BurnBytesConverter;
+        use plast::BurnBytesConverter;
 
         let shard = create_mock_shard(&[10, 20, 30, 40]);
         let storage = MmapStorage::load_data(MmapSetup::new(vec![shard.path()])).unwrap();

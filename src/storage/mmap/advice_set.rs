@@ -1,4 +1,4 @@
-use crate::errors::DataLoaderError;
+use super::super::error::DataLoaderError;
 use memmap2::{Advice, Mmap, MmapMut};
 
 /// A collection of memory advice hints to be applied to a memory-mapped file.

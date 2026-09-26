@@ -1,5 +1,5 @@
-use crate::errors::DataLoaderError;
-use crate::mmap_setup::MmapSetup;
+use super::super::error::DataLoaderError;
+use super::setup::MmapSetup;
 use crate::storage::Storage;
 use bytes::Bytes;
 use std::ops::Range;
