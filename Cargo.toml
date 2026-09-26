@@ -37,6 +37,8 @@ burn = [
     "dep:burn-tensor",
 ]
 
+legacy = ["dep:memmap2", "dep:bytemuck"]
+
 full = [
     "dataloader",
     "pretokenizer",

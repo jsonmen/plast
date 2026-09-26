@@ -1,7 +1,12 @@
 #[cfg(feature = "dataloader")]
 pub mod dataloader;
+
+#[cfg(feature = "legacy")]
+pub mod legacy;
+
 #[cfg(feature = "pretokenizer")]
 pub mod pretokenizer;
+
 pub mod storage;
 
 // Always available core traits/structs
@@ -14,9 +19,15 @@ pub use dataloader::{BytesConverter, Dataloader, DataloaderType};
 #[cfg(all(feature = "dataloader", feature = "burn"))]
 pub use dataloader::BurnBytesConverter;
 
+#[cfg(feature = "legacy")]
+pub use legacy::{MmapPretokenizedDataLoader, MmapPretokenizedDataLoaderBytes};
+
 // Pretokenizer feature re-exports
 #[cfg(feature = "pretokenizer")]
-pub use pretokenizer::{ShardLoader, pretokenize_dataset, utils};
+pub use pretokenizer::{
+    ShardLoader, pretokenize_dataset,
+    utils::{fetch_arrow_files, fetch_bin_files},
+};
 
 // Storage feature re-exports
 #[cfg(feature = "experimental-buffer-storage")]
