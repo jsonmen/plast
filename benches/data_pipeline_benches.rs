@@ -135,7 +135,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
         .unwrap();
     let f = module.load_function("sum_tokens").unwrap();
 
-    let context_window_elements = 4096;
+    let context_window_elements = 4096 * 64;
     let context_window_bytes = context_window_elements * BYTES_PER_TOKEN;
 
     let gpu_vec = stream.alloc_zeros::<u32>(context_window_elements).unwrap();
@@ -210,9 +210,8 @@ fn bench_gpu_saturation(c: &mut Criterion) {
             let len = shard.len();
 
             // Verify pointer is page aligned (4096 bytes)
-            let page_size = 4096;
             let addr = ptr as usize;
-            let offset = addr % page_size;
+            let offset = addr % context_window_elements;
 
             // Adjust pointer DOWN to page start, and adjust len UP by offset
             // BUT DO NOT extend past the exact end of mapped pages!
