@@ -1,3 +1,5 @@
+//! Memory advice hints for memory-mapped files.
+
 use super::super::error::DataLoaderError;
 use memmap2::{Advice, Mmap, MmapMut};
 
@@ -10,42 +12,39 @@ use memmap2::{Advice, Mmap, MmapMut};
 ///
 /// # Examples
 ///
-/// ## 1. Using the OS-optimized defaults (Recommended for Linux)
-/// ```ignore
-/// let storage = MmapStorage::load_data(
-///     vec!["data/train.bin"],
-///     AdviceSet::default() // Uses Sequential + HugePage on Linux
-/// )?;
+/// ## 1. Using the OS-optimizing defaults (Recommended for Linux)
+/// ```rust,ignore
+/// let setup = MmapSetup::new(vec!["data/train.bin"])
+///     .with_advice_set(AdviceSet::default()); // Uses Sequential + HugePage on Linux
 /// ```
 ///
 /// ## 2. Customizing advice for specific access patterns
-/// ```ignore
+/// ```rust,ignore
 /// // Use Random access hints if you are shuffling data heavily
-/// let storage = MmapStorage::load_data(
-///     vec!["data/shuffled.bin"],
-///     [Advice::Random, Advice::WillNeed] // Pass an array directly!
-/// )?;
+/// let setup = MmapSetup::new(vec!["data/shuffled.bin"])
+///     .with_advice_set([Advice::Random, Advice::WillNeed]); // Pass an array directly!
 /// ```
 ///
 /// ## 3. Cross-platform safety (macOS/Windows)
-/// ```ignore
+/// ```rust,ignore
 /// // On non-Linux systems, HugePage is unsupported.
 /// // Use empty() or basic POSIX flags like Sequential.
-/// let storage = MmapStorage::load_data(
-///     vec!["data/test.bin"],
-///     AdviceSet::empty()
-/// )?;
+/// let setup = MmapSetup::new(vec!["data/test.bin"])
+///     .with_advice_set(AdviceSet::empty());
 /// ```
+///
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdviceSet {
     advice: Vec<Advice>,
 }
+
 impl AdviceSet {
     pub fn new<A: AsRef<[Advice]>>(advices: A) -> Self {
         Self {
             advice: advices.as_ref().to_vec(),
         }
     }
+
     /// Creates an empty `AdviceSet`.
     ///
     /// This is useful for platforms that do not support `madvise` (like Windows)
@@ -53,10 +52,11 @@ impl AdviceSet {
     pub fn empty() -> Self {
         Self { advice: vec![] }
     }
+
     /// Applies the stored advice to the provided memory map.
     ///
     /// Returns a `DataLoaderError::AdviseFailed` if the operating system
-    /// rejects any of the provided hints (e.g., using `HugePage` on macOS).
+    /// rejects any of the provided hints.
     pub fn apply(&self, mmap: &Mmap) -> Result<(), DataLoaderError> {
         for &advice in &self.advice {
             mmap.advise(advice).map_err(|source| {
@@ -93,6 +93,7 @@ impl Default for AdviceSet {
         }
     }
 }
+
 impl From<Vec<Advice>> for AdviceSet {
     fn from(v: Vec<Advice>) -> Self {
         Self { advice: v }

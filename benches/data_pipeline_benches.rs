@@ -3,6 +3,7 @@ use plast::dataloader::{BYTES_PER_TOKEN, BytesConverter, Dataloader};
 use plast::{BufferStorage, MmapSetup, MmapStorage, Storage, pretokenize_dataset};
 use polars::prelude::*;
 use std::io::Write;
+use std::sync::Arc;
 use std::time::Instant;
 use tempfile::{NamedTempFile, TempDir};
 use tokenizers::Tokenizer;
@@ -62,6 +63,8 @@ fn bench_pretokenizer(c: &mut Criterion) {
         .map(|s| tokenizer.encode(s, false).unwrap().get_ids().len() as u64)
         .sum();
 
+    let dataset_ref = Arc::new(dataset);
+
     let mut group = c.benchmark_group("Pretokenizer_Performance");
     group.measurement_time(std::time::Duration::from_secs(15));
     group.sample_size(20);
@@ -70,15 +73,17 @@ fn bench_pretokenizer(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(raw_bytes));
     group.bench_function("Input_Bytes_Throughput", |b| {
         b.iter_with_setup(
-            || TempDir::new().unwrap(),
-            |tmp_dir| {
+            || (TempDir::new().unwrap(), dataset_ref.clone()),
+            |(tmp_dir, data)| {
+                let iter = std::iter::once(Ok((*data).clone()));
+
                 let _ = pretokenize_dataset(
                     &tokenizer,
-                    vec![Ok(dataset.clone())].into_iter(),
+                    iter,
                     tmp_dir.path(),
                     50 * 1024 * 1024,
                     50256,
-                    8,
+                    2048,
                 )
                 .unwrap();
             },
@@ -89,15 +94,16 @@ fn bench_pretokenizer(c: &mut Criterion) {
     group.throughput(Throughput::Elements(total_tokens));
     group.bench_function("Output_Tokens_Throughput", |b| {
         b.iter_with_setup(
-            || TempDir::new().unwrap(),
-            |tmp_dir| {
+            || (TempDir::new().unwrap(), dataset_ref.clone()),
+            |(tmp_dir, data)| {
+                let iter = std::iter::once(Ok((*data).clone()));
                 let _ = pretokenize_dataset(
                     &tokenizer,
-                    vec![Ok(dataset.clone())].into_iter(),
+                    iter,
                     tmp_dir.path(),
                     50 * 1024 * 1024,
                     50256,
-                    8,
+                    2048,
                 )
                 .unwrap();
             },
@@ -199,37 +205,6 @@ fn bench_gpu_saturation(c: &mut Criterion) {
         let storage =
             MmapStorage::load_data_mut(MmapSetup::new(paths.clone()).read_write()).unwrap();
 
-        let mut registered_ptrs = std::collections::HashSet::new();
-
-        for shard in storage.shards() {
-            if shard.is_empty() {
-                continue;
-            }
-
-            let ptr = shard.as_ptr() as *mut std::ffi::c_void;
-            let len = shard.len();
-
-            // Verify pointer is page aligned (4096 bytes)
-            let addr = ptr as usize;
-            let offset = addr % context_window_elements;
-
-            // Adjust pointer DOWN to page start, and adjust len UP by offset
-            // BUT DO NOT extend past the exact end of mapped pages!
-            let aligned_ptr = (addr - offset) as *mut std::ffi::c_void;
-
-            // Exact mapped length: using exact `len` avoids overshooting file bounds
-            let safe_len = len;
-
-            if registered_ptrs.insert(aligned_ptr) {
-                unsafe {
-                    // Include READ_ONLY flag if your mmap files are read-only
-                    let flags = cudarc::driver::sys::CU_MEMHOSTREGISTER_PORTABLE;
-
-                    let _ = cudarc::driver::sys::cuMemHostRegister_v2(aligned_ptr, safe_len, flags);
-                }
-            }
-        }
-
         b.iter_custom(|iters| {
             let start = Instant::now();
             for _ in 0..iters {
@@ -316,7 +291,7 @@ fn bench_buffer_storage_gpu_saturation(c: &mut Criterion) {
         .unwrap();
     let f = module.load_function("sum_tokens").unwrap();
 
-    let context_window_elements = 4096;
+    let context_window_elements = 4096 * 64;
     let context_window_bytes = context_window_elements * BYTES_PER_TOKEN;
 
     let gpu_vec = stream.alloc_zeros::<u32>(context_window_elements).unwrap();
@@ -336,7 +311,7 @@ fn bench_buffer_storage_gpu_saturation(c: &mut Criterion) {
                 // IMPORTANT: Unlike MmapStorage, BufferStorage is a single-pass consumer
                 // (it drains the crossbeam channel). We MUST recreate it per iteration
                 // to measure the full pipeline cost (file open + mmap + thread spawn + read).
-                let mut storage = BufferStorage::load_data(paths.clone(), 4).unwrap();
+                let mut storage = BufferStorage::load_data(paths.clone(), 8).unwrap();
                 let mut steps_done = 0;
 
                 while steps_done < iterations {
@@ -387,7 +362,7 @@ fn bench_buffer_storage_gpu_saturation(c: &mut Criterion) {
             for _ in 0..iters {
                 // IMPORTANT: Recreate storage per iteration because BufferStorage is single-pass.
                 // Buffer size of 4 allows the background thread to prefetch up to 4 shards.
-                let storage = BufferStorage::load_data(paths.clone(), 4).unwrap();
+                let storage = BufferStorage::load_data(paths.clone(), 8).unwrap();
 
                 // Dataloader consumes the storage, satisfying the API design
                 let mut dataloader = Dataloader::<BufferStorage, BytesConverter>::new(

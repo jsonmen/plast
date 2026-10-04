@@ -8,8 +8,35 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokenizers::Tokenizer;
 
-/// Pretokenizes a dataset and writes it out to sized file shards.
+fn finalize_shard(
+    buf: &mut Option<BufWriter<File>>,
+    path: &Path,
+    index: usize,
+    tokens: usize,
+    start: Instant,
+) -> Result<(), PretokenizerError> {
+    if let Some(mut writer) = buf.take() {
+        writer.flush().map_err(|e| PretokenizerError::FlushFailed {
+            source: e,
+            path: path.to_path_buf(),
+        })?;
+
+        let elapsed = start.elapsed().as_secs_f64();
+        let tok_per_sec = if elapsed > 0.0 {
+            tokens as f64 / elapsed
+        } else {
+            0.0
+        };
+        log::info!(
+            "Finished shard {index}. Tokens: {tokens}, Time: {elapsed:.2}s, Throughput: {tok_per_sec:.2} tok/s"
+        );
+    }
+    Ok(())
+}
+
+/// Pretokenizes an iterator of string chunks and outputs binary-encoded token shards.
 ///
+/// Output files are written in little-endian `u32` format as `pretokenized_shard_N.bin`.
 /// Log verbosity is handled through standard telemetry (`log::info` / `log::debug`).
 pub fn pretokenize_dataset<I, P>(
     tokenizer: &Tokenizer,
@@ -35,35 +62,33 @@ where
     let tokenizer_clone = tokenizer.clone();
     let eos_bytes_vec = eos_id.to_le_bytes();
 
-    // CONFUSING MOMENT: Preventing Channel Deadlocks on Worker Panic
-    // If our background execution thread panics, `tx` might not be dropped cleanly,
-    // causing `rx.recv()` to hang forever. We wrap processing inside a worker thread
-    // that safely drops `tx` when exiting scope, signaling the consumer to stop.
+    // Producer Thread: Tokenizes in parallel using Rayon and streams token buffers to disk writer.
+    // The channel `tx` automatically closes when this thread exits (or panics), causing `rx.recv()` to terminate cleanly.
     std::thread::spawn(move || {
-        let _tx_guard = tx;
-
         for shard_result in dataset {
             let shard = match shard_result {
                 Ok(s) => s,
                 Err(err) => {
-                    eprintln!("Skipping corrupted shard: {err}");
+                    log::warn!("Skipping corrupted dataset shard: {err}");
                     continue;
                 }
             };
 
-            let tx_shard = _tx_guard.clone();
-            shard.par_iter().for_each_with(tx_shard, |tx, opt_text| {
-                if let Some(text) = opt_text
-                    && let Ok(encoding) = tokenizer_clone.encode_fast(text, false)
-                {
-                    let ids = encoding.get_ids().to_vec();
-                    let _ = tx.send(ids);
-                }
-            });
+            // Parallel tokenization across available Rayon threads
+            shard
+                .par_iter()
+                .for_each_with(tx.clone(), |tx_channel, opt_text| {
+                    if let Some(text) = opt_text
+                        && let Ok(encoding) = tokenizer_clone.encode_fast(text, false)
+                    {
+                        let _ = tx_channel.send(encoding.get_ids().to_vec());
+                    }
+                });
         }
+        // Drops the original `tx` handle here when scope ends
     });
 
-    let mut shard_count = 0;
+    let mut shard_count: usize = 0;
     let mut current_shard_bytes = 0;
     let mut shard_tokens = 0;
     let mut shard_start_time = Instant::now();
@@ -72,42 +97,26 @@ where
     let mut generated_shards = Vec::new();
 
     while let Ok(payload) = rx.recv() {
-        let token_count = payload.len() + 1; // Tokens + 1 EOS marker
+        let token_count = payload.len() + 1; // Tokens + EOS
         let ids_bytes: &[u8] = bytemuck::cast_slice(&payload);
         let payload_bytes_len = ids_bytes.len() + eos_bytes_vec.len();
 
-        // CONFUSING MOMENT: Shard Rollover Logic
-        // Check if we need to initialize a brand new shard file due to space limits or initialization.
+        // Rollover to new shard if size limit exceeded or buffer unitialized
         if buf.is_none() || current_shard_bytes >= shard_size_bytes {
-            if let Some(mut old_buf) = buf.take() {
-                old_buf
-                    .flush()
-                    .map_err(|e| PretokenizerError::FlushFailed {
-                        source: e,
-                        path: current_file_path.clone(),
-                    })?;
-
-                let elapsed = shard_start_time.elapsed().as_secs_f64();
-                log::info!(
-                    "Finished shard {}. Tokens: {}, Time: {:.2}s, Throughput: {:.2} tok/s",
-                    shard_count - 1,
-                    shard_tokens,
-                    elapsed,
-                    if elapsed > 0.0 {
-                        shard_tokens as f64 / elapsed
-                    } else {
-                        0.0
-                    }
-                );
-            }
+            finalize_shard(
+                &mut buf,
+                &current_file_path,
+                shard_count.saturating_sub(1),
+                shard_tokens,
+                shard_start_time,
+            )?;
 
             shard_tokens = 0;
             shard_start_time = Instant::now();
-            current_file_path =
-                save_dir_ref.join(format!("pretokenized_shard_{}.bin", shard_count));
+            current_file_path = save_dir_ref.join(format!("pretokenized_shard_{shard_count}.bin"));
 
             log::debug!("Creating new shard: {:?}", current_file_path);
-            let f = File::create(&current_file_path).map_err(|e| {
+            let file = File::create(&current_file_path).map_err(|e| {
                 PretokenizerError::ShardCreationFailed {
                     source: e,
                     path: current_file_path.clone(),
@@ -115,7 +124,7 @@ where
             })?;
 
             generated_shards.push(current_file_path.clone());
-            buf = Some(BufWriter::with_capacity(512 * 1024, f));
+            buf = Some(BufWriter::with_capacity(512 * 1024, file));
             current_shard_bytes = 0;
             shard_count += 1;
         }
@@ -138,27 +147,13 @@ where
     }
 
     // Flush the remaining remnants inside the final active buffer
-    if let Some(mut final_buf) = buf {
-        final_buf
-            .flush()
-            .map_err(|e| PretokenizerError::FlushFailed {
-                source: e,
-                path: current_file_path.clone(),
-            })?;
-
-        let elapsed = shard_start_time.elapsed().as_secs_f64();
-        log::info!(
-            "Finished final shard {}. Tokens: {}, Time: {:.2}s, Throughput: {:.2} tok/s",
-            shard_count - 1,
-            shard_tokens,
-            elapsed,
-            if elapsed > 0.0 {
-                shard_tokens as f64 / elapsed
-            } else {
-                0.0
-            }
-        );
-    }
+    finalize_shard(
+        &mut buf,
+        &current_file_path,
+        shard_count.saturating_sub(1),
+        shard_tokens,
+        shard_start_time,
+    )?;
 
     Ok(generated_shards)
 }

@@ -1,3 +1,5 @@
+//! Background-buffered storage backend for sequential workloads.
+
 use super::super::error::DataLoaderError;
 use crate::storage::Storage;
 use bytes::Bytes;
@@ -8,6 +10,27 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
 
+/// A storage backend that pre-fetches and buffers memory-mapped files in a background thread.
+///
+/// `BufferStorage` is designed for strictly sequential workloads where random access is not
+/// required. It spawns a worker thread that continuously reads and maps the next shard into
+/// memory, sending it over a bounded channel to the main thread. This helps hide I/O latency
+/// and keeps the main processing loop fed with data. At least it suppose to do this, but in current
+/// implementation it loads data slower than MmapStorage (for this reason it is **experimental**)
+///
+/// *Note: This implementation does not support `slice_random`.*
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use plast::storage::BufferStorage;
+///
+/// # fn run() -> Result<(), Box<dyn std::error::Error>> {
+/// let buffer_size = 2; // Keep up to 2 shards mapped in memory
+/// let storage = BufferStorage::load_data(vec!["data/train_1.bin", "data/train_2.bin", , "data/train_3.bin"], buffer_size)?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct BufferStorage {
     rx: Receiver<Bytes>,
     _worker_handle: Option<JoinHandle<()>>,
@@ -18,7 +41,16 @@ pub struct BufferStorage {
     local_cursor: usize,
     total_size: usize,
 }
+
 impl BufferStorage {
+    /// Loads the specified files into a background-buffered storage.
+    ///
+    /// # Arguments
+    /// * `data_files` - A vector of paths to the data files.
+    /// * `buffer_size` - The maximum number of shards to keep mapped and buffered in memory simultaneously.
+    ///
+    /// # Errors
+    /// Returns a `DataLoaderError` if the metadata for any file cannot be read.
     pub fn load_data<P: AsRef<Path>>(
         data_files: Vec<P>,
         buffer_size: usize,
@@ -75,7 +107,9 @@ impl Storage for BufferStorage {
     fn len(&self) -> usize {
         self.total_size
     }
-    fn clear_state(&mut self) -> () {
+
+    /// Resets the sequential cursor to the beginning of the dataset and restarts the background fetching worker thread.
+    fn clear_state(&mut self) {
         let buffer_size = self.rx.capacity().unwrap(); // Safe because channel is always bounded
         drop(std::mem::replace(&mut self.rx, crossbeam_channel::never()));
 
@@ -109,6 +143,7 @@ impl Storage for BufferStorage {
         self.current_shard_idx = 0;
         self.local_cursor = 0;
     }
+
     fn slice_sequential(&mut self, req_len: usize) -> Option<Bytes> {
         while self.current_shard_idx <= self.total_shard_count {
             if let Some(active_buffer) = &self.active_buffer {
@@ -128,7 +163,9 @@ impl Storage for BufferStorage {
         }
         None
     }
+
+    /// Random access is not supported by `BufferStorage`. Always returns `None`.
     fn slice_random(&self, _range: Range<usize>) -> Option<Bytes> {
-        None // Can't be implemented
+        None
     }
 }

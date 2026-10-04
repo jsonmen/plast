@@ -13,12 +13,12 @@ use std::path::Path;
 pub struct MmapPretokenizedDataLoader {
     /// Vector of raw memory-mapped files.
     shards: Vec<Mmap>,
-    /// Track logical capacity per shard measured in *elements* (4 bytes each).
+    /// Track capacity per shard measured in *elements* (4 bytes each).
     shard_lengths: Vec<usize>,
     /// Cumulative raw byte start offsets for calculating global locations.
     /// This vector always has a length of `shards.len() + 1`.
     shard_offsets: Vec<usize>,
-    /// Total logical elements across all shards combined.
+    /// Total lelements across all shards combined.
     total_size: usize,
 }
 
@@ -89,7 +89,7 @@ impl MmapPretokenizedDataLoader {
         })
     }
 
-    /// Returns the total number of logical elements (4-byte chunks) across all shards.
+    /// Returns the total number of elements (4-byte chunks) across all shards.
     #[inline]
     pub fn total_size(&self) -> usize {
         self.total_size
