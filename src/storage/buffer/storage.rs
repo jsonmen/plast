@@ -146,12 +146,12 @@ impl Storage for BufferStorage {
 
     fn slice_sequential(&mut self, req_len: usize) -> Option<Bytes> {
         while self.current_shard_idx <= self.total_shard_count {
-            if let Some(active_buffer) = &self.active_buffer {
-                if self.local_cursor + req_len <= active_buffer.len() {
-                    let start = self.local_cursor;
-                    self.local_cursor += req_len;
-                    return Some(active_buffer.slice(start..start + req_len));
-                }
+            if let Some(active_buffer) = &self.active_buffer
+                && self.local_cursor + req_len <= active_buffer.len()
+            {
+                let start = self.local_cursor;
+                self.local_cursor += req_len;
+                return Some(active_buffer.slice(start..start + req_len));
             }
             if let Ok(next_buffer) = self.rx.recv() {
                 self.active_buffer = Some(next_buffer);
