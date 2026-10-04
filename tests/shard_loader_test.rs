@@ -1,7 +1,11 @@
 #[cfg(test)]
 mod tests {
     use plast::pretokenizer::ShardLoader; // or use plast::ShardLoader;
-    use polars::prelude::*;
+    use polars::prelude::SerWriter;
+    use polars::prelude::{
+        CsvWriter, DataFrame, IpcStreamWriter, IpcWriter, JsonFormat, JsonWriter, NamedFrom,
+        ParquetWriter, Series,
+    };
     use std::io::{Seek, SeekFrom, Write};
     use tempfile::NamedTempFile;
 

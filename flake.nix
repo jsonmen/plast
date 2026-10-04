@@ -98,6 +98,10 @@
             pname = "plast-clippy";
             version = "0.0.3";
             src = ./.;
+            cargoBuildFlags = [
+              "--features"
+              "full"
+            ];
 
             cargoLock = {
               lockFile = ./Cargo.lock;
@@ -107,7 +111,7 @@
 
             buildPhase = ''
               ${cudaEnvVars}
-              cargo clippy --features full -- -D warnings
+              cargo clippy --all-targets --features full --features full -- -D warnings
             '';
 
             installPhase = "touch $out";

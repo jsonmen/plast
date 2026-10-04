@@ -14,7 +14,7 @@ use cudarc::nvrtc::Ptx;
 
 /// Mock data generation helper
 fn create_heavy_mock_dataset(rows: usize) -> StringChunked {
-    let base_phrases = vec![
+    let base_phrases = [
         "The quick brown fox jumps over the lazy dog near rust arrays.",
         "High performance data structures saturate storage bandwidth channels cleanly.",
         "Unsafe code blocks decouple execution architectures from safety monitors.",
@@ -179,8 +179,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
                         };
 
                         let threads_per_block = 256;
-                        let blocks_per_grid =
-                            ((n + threads_per_block - 1) / threads_per_block) as u32;
+                        let blocks_per_grid = n.div_ceil(threads_per_block) as u32;
                         let cfg = LaunchConfig {
                             grid_dim: (blocks_per_grid, 1, 1),
                             block_dim: (threads_per_block as u32, 1, 1),
@@ -229,7 +228,7 @@ fn bench_gpu_saturation(c: &mut Criterion) {
                     };
 
                     let threads_per_block = 256;
-                    let blocks_per_grid = ((n + threads_per_block - 1) / threads_per_block) as u32;
+                    let blocks_per_grid = n.div_ceil(threads_per_block) as u32;
                     let cfg = LaunchConfig {
                         grid_dim: (blocks_per_grid, 1, 1),
                         block_dim: (threads_per_block as u32, 1, 1),
@@ -329,8 +328,7 @@ fn bench_buffer_storage_gpu_saturation(c: &mut Criterion) {
                         };
 
                         let threads_per_block = 256;
-                        let blocks_per_grid =
-                            ((n + threads_per_block - 1) / threads_per_block) as u32;
+                        let blocks_per_grid = n.div_ceil(threads_per_block) as u32;
                         let cfg = LaunchConfig {
                             grid_dim: (blocks_per_grid, 1, 1),
                             block_dim: (threads_per_block as u32, 1, 1),
@@ -384,7 +382,7 @@ fn bench_buffer_storage_gpu_saturation(c: &mut Criterion) {
                     };
 
                     let threads_per_block = 256;
-                    let blocks_per_grid = ((n + threads_per_block - 1) / threads_per_block) as u32;
+                    let blocks_per_grid = n.div_ceil(threads_per_block) as u32;
                     let cfg = LaunchConfig {
                         grid_dim: (blocks_per_grid, 1, 1),
                         block_dim: (threads_per_block as u32, 1, 1),
