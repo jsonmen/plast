@@ -32,6 +32,20 @@ fn create_heavy_mock_dataset(rows: usize) -> StringChunked {
     Series::new("text".into(), values).str().unwrap().clone()
 }
 
+fn load_real_text_sample() -> StringChunked {
+    // Read actual parquet file into string column
+    // This sample.parquet is 013_00000.parquet from sample-10BT fineweb-edu
+    let df = LazyFrame::scan_parquet(
+        polars::prelude::PlRefPath::new("fixtures/sample.parquet"),
+        Default::default(),
+    )
+    .unwrap()
+    .slice(0, 40000)
+    .collect()
+    .unwrap();
+    df.column("text").unwrap().str().unwrap().clone()
+}
+
 fn create_mock_tokenizer() -> Tokenizer {
     let large_json_data = include_str!("../fixtures/mock_tokenizer.json");
 
@@ -47,7 +61,7 @@ fn create_mock_tokenizer() -> Tokenizer {
 /// 1. BENCHMARK: CPU Pretokenizer pipeline throughput
 fn bench_pretokenizer(c: &mut Criterion) {
     let tokenizer = create_mock_tokenizer();
-    let dataset = create_heavy_mock_dataset(200_000);
+    let dataset = load_real_text_sample();
 
     // 1. Calculate raw input bytes
     let raw_bytes = dataset
@@ -67,7 +81,7 @@ fn bench_pretokenizer(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("Pretokenizer_Performance");
     group.measurement_time(std::time::Duration::from_secs(15));
-    group.sample_size(20);
+    group.sample_size(10);
 
     // --- Metric 1: Input Data Throughput (MiB/s or GiB/s) ---
     group.throughput(Throughput::Bytes(raw_bytes));

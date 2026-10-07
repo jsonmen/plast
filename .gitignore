@@ -7,6 +7,7 @@
 .env.*
 pretokenized/
 tokenizer.json
+fixtures/sample.parquet
 
 # Added by cargo
 
