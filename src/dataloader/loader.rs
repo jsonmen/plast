@@ -5,7 +5,7 @@
 
 use super::{
     datatypes::{BytesConverter, DataloaderType},
-    iterators::DataloaderIter,
+    iterators::{DataloaderIter, TFDataloaderIter},
 };
 use crate::storage::Storage;
 use std::marker::PhantomData;
@@ -99,5 +99,24 @@ impl<S: Storage, D: DataloaderType> Dataloader<S, D> {
     #[cfg(feature = "burn")]
     pub fn iter_burn_bytes(&mut self) -> DataloaderIter<'_, S, BurnBytesConverter> {
         DataloaderIter::new(&mut self.storage, self.num_elements * BYTES_PER_TOKEN)
+    }
+    /// Returns an iterator that yields `D::Output` over the dataset.
+    ///
+    /// The iterator will yield batches of `self.num_elements` elements.
+    pub fn tf_iter(&mut self) -> TFDataloaderIter<'_, S, D> {
+        TFDataloaderIter::new(&mut self.storage, self.num_elements * BYTES_PER_TOKEN)
+    }
+
+    /// Returns an iterator that yields raw `Bytes` regardless of the configured `D` type.
+    pub fn tf_iter_bytes(&mut self) -> TFDataloaderIter<'_, S, BytesConverter> {
+        TFDataloaderIter::new(&mut self.storage, self.num_elements * BYTES_PER_TOKEN)
+    }
+
+    /// Returns an iterator that yields Burn's `Bytes` type.
+    ///
+    /// Requires the `burn` feature to be enabled.
+    #[cfg(feature = "burn")]
+    pub fn tf_iter_burn_bytes(&mut self) -> TFDataloaderIter<'_, S, BurnBytesConverter> {
+        TFDataloaderIter::new(&mut self.storage, self.num_elements * BYTES_PER_TOKEN)
     }
 }

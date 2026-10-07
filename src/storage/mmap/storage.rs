@@ -251,4 +251,43 @@ impl Storage for MmapStorage {
 
         None
     }
+    fn slice_tf_sequential(&mut self, req_len: usize) -> Option<(Bytes, Bytes)> {
+        while self.current_shard_idx < self.shards.len() {
+            let active_shard = &self.shards[self.current_shard_idx];
+
+            if self.local_cursor + req_len + 4 <= active_shard.len() {
+                let start = self.local_cursor;
+                self.local_cursor += req_len;
+                return Some((
+                    active_shard.slice(start..start + req_len),
+                    active_shard.slice(start + 4..start + req_len + 4),
+                ));
+            }
+
+            self.current_shard_idx += 1;
+            self.local_cursor = 0;
+        }
+
+        None
+    }
+    fn slice_tf_random(&self, range: Range<usize>) -> Option<(Bytes, Bytes)> {
+        let req_len = range.end - range.start;
+        let total_bytes = *self.shard_offsets.last().unwrap_or(&0);
+
+        if req_len == 0 || range.end > total_bytes {
+            return None;
+        }
+
+        let (shard_idx, local_offset) = self.locate(range.start);
+        let active_shard = &self.shards[shard_idx];
+
+        if local_offset + req_len + 4 <= active_shard.len() {
+            Some((
+                active_shard.slice(local_offset..local_offset + req_len),
+                active_shard.slice(local_offset + 4..local_offset + req_len + 4),
+            ))
+        } else {
+            None
+        }
+    }
 }

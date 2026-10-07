@@ -168,4 +168,32 @@ impl Storage for BufferStorage {
     fn slice_random(&self, _range: Range<usize>) -> Option<Bytes> {
         None
     }
+
+    fn slice_tf_sequential(&mut self, req_len: usize) -> Option<(Bytes, Bytes)> {
+        while self.current_shard_idx <= self.total_shard_count {
+            if let Some(active_buffer) = &self.active_buffer
+                && self.local_cursor + req_len + 4 <= active_buffer.len()
+            {
+                let start = self.local_cursor;
+                self.local_cursor += req_len;
+                return Some((
+                    active_buffer.slice(start..start + req_len),
+                    active_buffer.slice(start + 4..start + req_len + 4),
+                ));
+            }
+            if let Ok(next_buffer) = self.rx.recv() {
+                self.active_buffer = Some(next_buffer);
+                self.current_shard_idx += 1;
+                self.local_cursor = 0;
+            } else {
+                return None;
+            }
+        }
+        None
+    }
+
+    /// Random access is not supported by `BufferStorage`. Always returns `None`.
+    fn slice_tf_random(&self, _range: Range<usize>) -> Option<(Bytes, Bytes)> {
+        None
+    }
 }

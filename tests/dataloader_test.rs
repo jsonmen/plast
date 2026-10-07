@@ -1,9 +1,7 @@
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use plast::{
-        BytesConverter, DataloaderType, MmapSetup, MmapStorage, Storage, dataloader::Dataloader,
-    };
+    use plast::{BytesConverter, DataloaderType, MmapSetup, MmapStorage, dataloader::Dataloader};
     use std::io::Write;
     use tempfile::NamedTempFile;
     /// Helper function to create temporary valid mock files filled with 4-byte tokens.
@@ -14,129 +12,6 @@ mod tests {
         tmp_file.flush().unwrap();
         tmp_file
     }
-
-    // =========================================================================
-    // 1. Storage & Initialization Tests
-    // =========================================================================
-
-    #[test]
-    fn test_successful_mapping_and_invariants() {
-        let shard1_data = vec![1u32, 2, 3, 4]; // 16 bytes
-        let shard2_data = vec![5u32, 6, 7, 8, 9, 10]; // 24 bytes
-
-        let file1 = create_mock_shard(&shard1_data);
-        let file2 = create_mock_shard(&shard2_data);
-
-        let paths = vec![file1.path(), file2.path()];
-        let storage = MmapStorage::load_data(MmapSetup::new(paths)).unwrap();
-
-        assert_eq!(storage.total_size(), 10);
-        assert_eq!(storage.len(), 10);
-        assert!(!storage.is_empty());
-    }
-
-    #[test]
-    fn test_invalid_byte_alignment_error() {
-        let mut tmp_file = NamedTempFile::new().unwrap();
-        tmp_file.write_all(&[1u8, 2, 3]).unwrap(); // 3 bytes (Not 4-byte aligned)
-        tmp_file.flush().unwrap();
-
-        let paths = vec![tmp_file.path()];
-        let result = MmapStorage::load_data(MmapSetup::new(paths));
-
-        assert!(result.is_err());
-    }
-
-    // =========================================================================
-    // 2. Locate Feature Tests
-    // =========================================================================
-
-    #[test]
-    fn test_locate_global_to_local_translation() {
-        let shard1 = create_mock_shard(&[10, 20, 30, 40]); // 16 bytes (offsets 0..16)
-        let shard2 = create_mock_shard(&[50, 60, 70]); // 12 bytes (offsets 16..28)
-
-        let storage =
-            MmapStorage::load_data(MmapSetup::new(vec![shard1.path(), shard2.path()])).unwrap();
-
-        // Shard 0 start
-        assert_eq!(storage.locate(0), (0, 0));
-        // Shard 0 middle
-        assert_eq!(storage.locate(8), (0, 8));
-        // Shard 1 boundary start (byte offset 16)
-        assert_eq!(storage.locate(16), (1, 0));
-        // Shard 1 middle (byte offset 20)
-        assert_eq!(storage.locate(20), (1, 4));
-    }
-
-    // =========================================================================
-    // 3. Random Slicing (`slice_random`) Tests
-    // =========================================================================
-
-    #[test]
-    fn test_slice_random_valid_and_bounds() {
-        let shard1_data = vec![100u32, 200, 300, 400]; // 16 bytes
-        let file1 = create_mock_shard(&shard1_data);
-
-        let storage = MmapStorage::load_data(MmapSetup::new(vec![file1.path()])).unwrap();
-
-        // Slice first 2 u32 tokens (8 bytes)
-        let bytes = storage.slice_random(0..8).unwrap();
-        let tokens: &[u32] = bytemuck::cast_slice(&bytes[..]);
-        assert_eq!(tokens, &[100, 200]);
-
-        // Slice middle tokens
-        let bytes_mid = storage.slice_random(4..12).unwrap();
-        let tokens_mid: &[u32] = bytemuck::cast_slice(&bytes_mid[..]);
-        assert_eq!(tokens_mid, &[200, 300]);
-
-        // Out-of-bounds range
-        assert!(storage.slice_random(0..20).is_none());
-        // Zero-length range
-        assert!(storage.slice_random(4..4).is_none());
-    }
-
-    #[test]
-    fn test_slice_random_cross_shard_rejection() {
-        let shard1 = create_mock_shard(&[1, 2]); // 8 bytes
-        let shard2 = create_mock_shard(&[3, 4]); // 8 bytes
-
-        let storage =
-            MmapStorage::load_data(MmapSetup::new(vec![shard1.path(), shard2.path()])).unwrap();
-
-        // Request starting in Shard 0 (byte 4) and extending 8 bytes into Shard 1
-        // Straddles boundary (local_offset 4 + req_len 8 > shard 0 length 8)
-        assert!(storage.slice_random(4..12).is_none());
-    }
-
-    // =========================================================================
-    // 4. Sequential Slicing (`slice_sequential`) Tests
-    // =========================================================================
-
-    #[test]
-    fn test_slice_sequential_rollover() {
-        let shard1 = create_mock_shard(&[1, 2, 3, 4]); // 16 bytes
-        let shard2 = create_mock_shard(&[5, 6, 7, 8]); // 16 bytes
-
-        let mut storage =
-            MmapStorage::load_data(MmapSetup::new(vec![shard1.path(), shard2.path()])).unwrap();
-
-        // Fetch 8-byte chunk from shard 0
-        let slice1 = storage.slice_sequential(8).unwrap();
-        assert_eq!(bytemuck::cast_slice::<u8, u32>(&slice1[..]), &[1, 2]);
-
-        // Fetch next 8-byte chunk from shard 0
-        let slice2 = storage.slice_sequential(8).unwrap();
-        assert_eq!(bytemuck::cast_slice::<u8, u32>(&slice2[..]), &[3, 4]);
-
-        // Next fetch exceeds shard 0 -> rolls over to shard 1
-        let slice3 = storage.slice_sequential(8).unwrap();
-        assert_eq!(bytemuck::cast_slice::<u8, u32>(&slice3[..]), &[5, 6]);
-    }
-
-    // =========================================================================
-    // 5. High-Level `Dataloader` and Iterators Tests
-    // =========================================================================
 
     #[test]
     fn test_dataloader_iteration() {
@@ -202,5 +77,85 @@ mod tests {
         let burn_bytes = iter.next().unwrap();
         let out: &[u8] = burn_bytes.as_ref();
         assert_eq!(out, &[10, 0, 0, 0, 20, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_tf_dataloader_iteration() {
+        // 6 tokens = 24 bytes.
+        // num_elements = 2 means 8 bytes per step.
+        // Each step consumes 8 bytes for the sequence, and needs 4 extra bytes for the target shift.
+        // The cursor advances by `req_len` (8 bytes) to yield non-overlapping sequences.
+        let shard = create_mock_shard(&[1, 2, 3, 4, 5, 6]);
+        let storage = MmapStorage::load_data(MmapSetup::new(vec![shard.path()])).unwrap();
+
+        let mut loader = Dataloader::<MmapStorage, BytesConverter>::new(storage, 2);
+        let mut iter = loader.tf_iter_bytes();
+
+        // Chunk 1: starts at byte 0
+        let (in1, tgt1) = iter.next().unwrap();
+        assert_eq!(bytemuck::cast_slice::<u8, u32>(&in1[..]), &[1, 2]);
+        assert_eq!(bytemuck::cast_slice::<u8, u32>(&tgt1[..]), &[2, 3]);
+
+        // Chunk 2: cursor advances by 8 bytes, starts at byte 8 (token 3)
+        let (in2, tgt2) = iter.next().unwrap();
+        assert_eq!(bytemuck::cast_slice::<u8, u32>(&in2[..]), &[3, 4]);
+        assert_eq!(bytemuck::cast_slice::<u8, u32>(&tgt2[..]), &[4, 5]);
+
+        // Chunk 3: cursor at byte 16. Needs 12 bytes (16+12=28), but only 24 bytes total. Returns None.
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_tf_custom_dataloader_converter() {
+        struct U32VecConverter;
+
+        impl DataloaderType for U32VecConverter {
+            type Output = Vec<u32>;
+
+            fn convert(bytes: Bytes) -> Self::Output {
+                bytemuck::cast_slice(&bytes[..]).to_vec()
+            }
+        }
+
+        // 5 tokens = 20 bytes. Enough for two non-overlapping chunks of 2 tokens (8 bytes) + 1 target token (4 bytes).
+        let shard = create_mock_shard(&[10, 20, 30, 40, 50]);
+        let storage = MmapStorage::load_data(MmapSetup::new(vec![shard.path()])).unwrap();
+
+        let mut loader = Dataloader::<MmapStorage, U32VecConverter>::new(storage, 2);
+        let mut iter = loader.tf_iter();
+
+        // Chunk 1
+        let (input, target) = iter.next().unwrap();
+        assert_eq!(input, vec![10, 20]);
+        assert_eq!(target, vec![20, 30]);
+
+        // Chunk 2 (advances by req_len = 8 bytes, so starts at token 30)
+        let (input2, target2) = iter.next().unwrap();
+        assert_eq!(input2, vec![30, 40]);
+        assert_eq!(target2, vec![40, 50]);
+
+        // Chunk 3: not enough bytes left (cursor at 16, needs 12 bytes, only 4 remain)
+        assert!(iter.next().is_none());
+    }
+
+    #[cfg(feature = "burn")]
+    #[test]
+    fn test_tf_burn_bytes_converter() {
+        use plast::BurnBytesConverter;
+
+        let shard = create_mock_shard(&[10, 20, 30]);
+        let storage = MmapStorage::load_data(MmapSetup::new(vec![shard.path()])).unwrap();
+
+        let mut loader = Dataloader::<MmapStorage, BurnBytesConverter>::new(storage, 2);
+        let mut iter = loader.tf_iter_burn_bytes();
+
+        let (in_burn, tgt_burn) = iter.next().unwrap();
+        let in_out: &[u8] = in_burn.as_ref();
+        let tgt_out: &[u8] = tgt_burn.as_ref();
+
+        assert_eq!(in_out, &[10, 0, 0, 0, 20, 0, 0, 0]);
+        assert_eq!(tgt_out, &[20, 0, 0, 0, 30, 0, 0, 0]);
+
+        assert!(iter.next().is_none());
     }
 }

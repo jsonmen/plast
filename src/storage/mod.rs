@@ -54,4 +54,25 @@ pub trait Storage {
     /// If the storage does not support random access, or if the range is out
     /// of bounds, this returns `None`.
     fn slice_random(&self, range: Range<usize>) -> Option<Bytes>;
+
+    /// Reads `req_len` *bytes* sequentially from the current cursor position for teacher forcing.
+    ///
+    /// Returns a tuple of two byte arrays `(input, target)`. The target sequence (second array)
+    /// is shifted by one token/element relative to the input sequence (first array).
+    ///
+    /// If the end of the data is reached before `req_len` bytes can be read,
+    /// or if the storage does not support sequential reading, this returns `None`.
+    ///
+    /// *Note: The parameter `req_len` represents the number of **bytes**, not elements.*
+    fn slice_tf_sequential(&mut self, req_len: usize) -> Option<(Bytes, Bytes)>;
+
+    /// Reads a slice of *bytes* defined by `range` from the storage for teacher forcing.
+    ///
+    /// Returns a tuple of two byte arrays `(input, target)`. The target sequence (second array)
+    /// is shifted by one token/element relative to the input sequence (first array).
+    ///
+    ///
+    /// Returns `None` if the storage does not support random access, if the range is out of bounds,
+    /// or if the end of the data is reached before `(range.end - range.start) + 4` bytes can be read.
+    fn slice_tf_random(&self, range: Range<usize>) -> Option<(Bytes, Bytes)>;
 }

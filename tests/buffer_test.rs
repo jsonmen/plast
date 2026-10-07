@@ -116,4 +116,37 @@ mod tests {
         assert!(storage.slice_random(0..8).is_none());
         assert!(storage.slice_random(10..20).is_none());
     }
+
+    #[test]
+    fn test_slice_tf_sequential_basic() {
+        // 5 tokens = 20 bytes.
+        // Requesting 8 bytes (2 tokens) means we need 8 + 4 = 12 bytes total per call.
+        let shard = create_mock_shard(&[1, 2, 3, 4, 5]);
+        let mut storage = BufferStorage::load_data(vec![shard.path()], 2).unwrap();
+
+        // First call: reads bytes 0..12 (tokens 1, 2, 3)
+        let (input1, target1) = storage.slice_tf_sequential(8).unwrap();
+        assert_eq!(bytemuck::cast_slice::<u8, u32>(&input1[..]), &[1, 2]);
+        assert_eq!(bytemuck::cast_slice::<u8, u32>(&target1[..]), &[2, 3]);
+
+        // Second call: cursor advanced by req_len (8 bytes), so it starts at byte 8 (token 3).
+        // Reads bytes 8..20 (tokens 3, 4, 5)
+        let (input2, target2) = storage.slice_tf_sequential(8).unwrap();
+        assert_eq!(bytemuck::cast_slice::<u8, u32>(&input2[..]), &[3, 4]);
+        assert_eq!(bytemuck::cast_slice::<u8, u32>(&target2[..]), &[4, 5]);
+
+        // Third call: cursor at byte 16. Needs 12 bytes, but only 4 bytes remain. Returns None.
+        assert!(storage.slice_tf_sequential(8).is_none());
+    }
+
+    #[test]
+    fn test_slice_tf_random_returns_none() {
+        let shard = create_mock_shard(&[1, 2, 3, 4]);
+        let storage = BufferStorage::load_data(vec![shard.path()], 2).unwrap();
+
+        // By design, BufferStorage does not support random access,
+        // including Teacher Forcing random access.
+        assert!(storage.slice_tf_random(0..8).is_none());
+        assert!(storage.slice_tf_random(10..20).is_none());
+    }
 }
