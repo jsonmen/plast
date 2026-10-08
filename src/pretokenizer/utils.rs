@@ -29,3 +29,30 @@ pub fn fetch_arrow_files<P: AsRef<Path>>(dir: P) -> io::Result<Vec<PathBuf>> {
 
     Ok(arrow_paths)
 }
+/// Fetches dir for files with extensions supported by the ShardLoader match statement
+pub fn fetch_data_files<P: AsRef<Path>>(dir: P) -> io::Result<Vec<PathBuf>> {
+    let mut data_paths = Vec::new();
+
+    // All extensions supported by the ShardLoader match statement
+    let supported_extensions = ["parquet", "arrow", "ipc", "jsonl", "ndjson", "csv", "txt"];
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_file() {
+            // Check if the file's extension is in the supported list
+            let is_supported = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| supported_extensions.contains(&ext.to_lowercase().as_str()))
+                .unwrap_or(false);
+
+            if is_supported {
+                data_paths.push(path);
+            }
+        }
+    }
+
+    Ok(data_paths)
+}
