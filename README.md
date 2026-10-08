@@ -4,7 +4,7 @@ A high-performance data pipeline designed to pretokenize datasets and stream the
 
 # Benchmark Scale
 
-//! * **Pretokenization Speed:** **~5.8M tokens/sec** (Processes FineWeb-Edu `sample-10B` in ~30 minutes).
+* **Pretokenization Speed:** **~5.8M tokens/sec** (Processes FineWeb-Edu `sample-10B` in ~30 minutes).
 * **DataLoader Streaming Speed:** Up to **10 GiB/s** (via sequential memory-mapped reads leveraging kernel page prefetching. Max throughput will further increase with memory pinning and async GPU host-to-device transfers to saturate PCIe bandwidth).
 
 > **Test Bench Setup:**
