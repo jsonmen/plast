@@ -1,67 +1,44 @@
-# Plast ⚡ (Fast Text/Token Dataloader)
+A high-performance data pipeline designed to pretokenize datasets and stream them directly to your training loop. It offers customizable data loading strategies and features a built-in zero-copy memory mapping strategy (`memmap2`) for maximum throughput.
 
-Plast is a high-performance Rust data pipeline designed to pretokenize datasets and stream them directly into memory using zero-copy memory mapping (`memmap2`).
+# Benchmark Scale
 
-I’m still relatively new to Rust, so I am incredibly open to code reviews, feedback, and suggestions! If you see something that can be optimized, please open an issue or a PR! I’d love to learn from it.
+//! * **Pretokenization Speed:** **~5.8M tokens/sec** (Processes FineWeb-Edu `sample-10B` in ~30 minutes).
+* **DataLoader Streaming Speed:** Up to **10 GiB/s** (via sequential memory-mapped reads leveraging kernel page prefetching. Max throughput will further increase with memory pinning and async GPU host-to-device transfers to saturate PCIe bandwidth).
 
-### Current Performance Scale
+> **Test Bench Setup:**
+> * **CPU:** AMD Ryzen 7 5800X (8C / 16T)
+> * **GPU:** NVIDIA GeForce RTX 3090 (24GB VRAM, PCIe 4.0 x16)
+> * **RAM:** 32GB DDR4
+> * **OS:** Linux (Kernel 7.0.10)
 
-* **Pretokenization Speed:** ~6M tokens/sec (it can chew through FineWeb-Edu's `sample-10B` in roughly 30 minutes).
-* **DataLoader Streaming Speed:** Up to **3.10 GiB/s** (effectively saturating the physical read limits of my NVMe SSD).
+# API Showcase
 
-> ⚠️ **Disclaimer**: This crate is in a very early stage of development. Breaking changes may occur between versions as the internal layout stabilizes.
+### 1. Streaming Data into an Execution Engine
 
----
-
-## 🛠️ API Showcase
-
-Here is how you can use Plast to pretokenize a dataset and stream it into an active execution engine loop.
-
+Here is how you can use Plast to stream pretokenized data.
 ```rust
-use plast::{PretokenizedDataLoader, ShardLoader, fetch_arrow_files, pretokenize_dataset};
-use tokenizers::Tokenizer;
-
+use plast::{MmapStorage, MmapSetup, AdviceSet, Dataloader, fetch_bin_files};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let context_window = 32 * 1024;
-    let batch_id = 42;
-    let tokenizer = Tokenizer::from_file("tokenizer.json").unwrap();
-    let dataset_files = fetch_arrow_files("dataset_dir")?;
+    let context_window = 2048; // Example context window size
+    let dataset_files = fetch_bin_files("pretokenized_dataset_dir")?;
     
-    // Converted to an owned String to ensure clean lifetime boundaries
-    let shardl = ShardLoader::new(dataset_files, "text_column_name".to_string());
+    let setup = MmapSetup::new(dataset_files)
+        .with_advice_set(AdviceSet::default());
+    let storage = MmapStorage::load_data(setup)?;
     
-    let eos_id = tokenizer
-        .token_to_id("<|endoftext|>")
-        .ok_or("No such token in tokenizer".to_string())?;
-
-    // Tokenize and shatter into 2 GiB maximum binary shards
-    let generated_shards = pretokenize_dataset(
-        &tokenizer,
-        shardl,
-        "./pretokenized_shards",
-        2 * 1024 * 1024 * 1024, // Shard size in bytes (2 GiB)
-        eos_id,                 // EOS Token ID
-        4196,                   // Write queue capacity
-    )?;
-
-    println!("Generated shards: {:?}", generated_shards);
-    let loader = PretokenizedDataLoader::map_data(generated_shards)?;
-
-    // Get contiguous input and target slices shifted by 1 token
-    if let Some((input_bytes, target_bytes)) = loader.get_tf_batch_u8(batch_id, context_window) {
-        // Zero-copy cast directly to integers for your tensor inputs
-        let inputs: &[u32] = bytemuck::cast_slice(input_bytes);
-        let targets: &[u32] = bytemuck::cast_slice(target_bytes);
-
+    let mut loader = Dataloader::<_, BytesConverter>::new(storage, 1024);
+    // Option A: Get input and target slices shifted by 1 token
+    for (i, (inputs, targets)) in loader.tf_iter(context_window).enumerate() {
         println!(
-            "Ready for transfer to gpu and use in model! Batch size: inputs: {} tokens; targets: {}",
-            inputs.len(),
-            targets.len()
+            "Ready for transfer to GPU! Batch size: {} tokens",
+            inputs.len()
         );
+        if i >= 10 {
+            break;
+        }
     }
-    
-    // Or you can iterate over the data sequentially
-    for (i, inputs) in loader.iter_u32(context_window).enumerate() {
+    // Option B: you can iterate over the data sequentially
+    for (i, inputs) in loader.iter(context_window).enumerate() {
         println!(
             "Ready for transfer to gpu and use in model! Batch size: {} tokens",
             inputs.len()
@@ -73,16 +50,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+### 2. Pretokenizing a Dataset
+
+Here is how you can use Plast to pretokenize raw data files.
+```rust
+use tokenizers::Tokenizer;
+use plast::{ShardLoader, pretokenize_dataset, fetch_data_files};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let tokenizer = Tokenizer::from_file("tokenizer.json")?;
+    let data_files = fetch_data_files("data/")?;
+    let shard_loader = ShardLoader::new(data_files, "text_column_name");
+    let eos_id = tokenizer
+        .token_to_id("<|endoftext|>")
+        .ok_or("No such token in tokenizer")?;
+    
+    let out_dir = "pretokenized_data/";
+    let _pretokenized_shards = pretokenize_dataset(
+        &tokenizer,
+        shard_loader,               
+        out_dir,
+        2 * 1024 * 1024 * 1024,     // Shard size in bytes (2 GiB)
+        eos_id,                     // EOS Token ID
+        2048,                       // Write queue capacity
+    )?;
+    
+    Ok(())
+}
+```
+
+# Architecture
+
+Plast is built on a clean 3-layer structure:
+1. **Storage**: Manages how data is stored, sliced, and loaded (e.g., zero-copy memory mapping via `memmap2` or buffered prefetching).
+2. **Dataloader**: An abstraction wrapper over Storage types that unifies and simplifies iterator creation.
+3. **Iterators**: Provides efficient, ready-to-use data streams (e.g., `tf_iter` for input/target pairs).
+
+### Roadmap 
+- [ ] Add compatibility with pytorch and build python api
+- [ ] Add possibility to pin data for faster gpu transfer
+- [ ] Try io_uring to load data
+
+
 ---
-
-## 🗺️ Roadmap / Todo List
-
-* [x] **Broader Format Support:** Add native streaming support for common data storage formats like Apache Parquet.
-* [ ] **Double-Buffered Pre-loading:** Double-buffer shards directly into RAM. While the GPU is crunching the current memory block, the CPU preloads the next shard in the background to break past physical SSD bottlenecks.
-* [ ] **Deep Learning Integration:** Build first-class integrations for the `Burn` framework.
-
----
-
 ## 🤖 Behind the Scenes: AI Usage
 
 Yes, I used AI to help build this project! However, it was used as an active engineering assistant for scaffolding boilerplate and writing unit tests, rather than blind "vibe coding."
