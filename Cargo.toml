@@ -1,7 +1,13 @@
 [package]
 name = "plast"
-version = "0.0.3"
+version = "0.1.0"
 edition = "2024"
+description = "A high-performance data pipeline designed to pretokenize datasets and stream them directly to your training loop with zero-copy memory mapping."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jsonmen/plast"
+readme = "README.md"
+keywords = ["machine-learning", "data-loader", "mmap", "tokenization", "deep-learning"]
+categories = ["science", "algorithms"]
 
 [lib]
 name = "plast"
@@ -10,6 +16,7 @@ path = "src/lib.rs"
 [[bench]]
 name = "data_pipeline_benches"
 harness = false
+required-features = ["full"]
 
 [features]
 dataloader = []
@@ -43,7 +50,6 @@ full = [
     "dataloader",
     "pretokenizer",
     "mmap-storage",
-    "experimental-buffer-storage",
     "burn",
 ]
 
@@ -63,7 +69,6 @@ rayon = { version = "1.12.0", optional = true }
 tokenizers = { version = "0.23.1", optional = true }
 
 [dev-dependencies]
-plast = { path = ".", features = ["full"] }
 criterion = "0.8.2"
 cudarc = { version = "0.19.8", features = ["cuda-12090"] }
 env_logger = "0.11.10"

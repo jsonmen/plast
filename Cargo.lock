@@ -3022,7 +3022,7 @@ dependencies = [
 
 [[package]]
 name = "plast"
-version = "0.0.3"
+version = "0.1.0"
 dependencies = [
  "burn-tensor",
  "bytemuck",
@@ -3033,7 +3033,6 @@ dependencies = [
  "env_logger",
  "log",
  "memmap2",
- "plast",
  "polars",
  "rayon",
  "tempfile",
