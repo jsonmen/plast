@@ -29,7 +29,9 @@ pub fn fetch_arrow_files<P: AsRef<Path>>(dir: P) -> io::Result<Vec<PathBuf>> {
 
     Ok(arrow_paths)
 }
-/// Fetches dir for files with extensions supported by the ShardLoader match statement
+/// Scans a directory and returns paths to all files with extensions supported by `ShardLoader`.
+///
+/// Supported extensions include: `parquet`, `arrow`, `ipc`, `jsonl`, `ndjson`, `csv`, and `txt`.
 pub fn fetch_data_files<P: AsRef<Path>>(dir: P) -> io::Result<Vec<PathBuf>> {
     let mut data_paths = Vec::new();
 
