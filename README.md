@@ -1,3 +1,5 @@
+# Plast ⚡ (Fast Text/Token Dataloader)
+
 A high-performance data pipeline designed to pretokenize datasets and stream them directly to your training loop. It offers customizable data loading strategies and features a built-in zero-copy memory mapping strategy (`memmap2`) for maximum throughput.
 
 # Benchmark Scale
