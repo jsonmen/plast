@@ -96,7 +96,7 @@
           # Check 2: Clippy with full features (uses rustPlatform for cargo caching)
           clippy = pkgs.rustPlatform.buildRustPackage {
             pname = "plast-clippy";
-            version = "0.0.3";
+            version = "0.1.1";
             src = ./.;
             cargoBuildFlags = [
               "--features"
@@ -120,7 +120,7 @@
           # Check 3: Full Feature Tests (uses rustPlatform for cargo caching)
           cargo-tests = pkgs.rustPlatform.buildRustPackage {
             pname = "plast-tests";
-            version = "0.0.3";
+            version = "0.1.1";
             src = ./.;
 
             cargoLock = {
@@ -140,7 +140,7 @@
           # Check 4: Check benchmark compilation without running or fetching network dependencies
           cargo-benches-compile = pkgs.rustPlatform.buildRustPackage {
             pname = "plast-benches-check";
-            version = "0.0.3";
+            version = "0.1.1";
             src = ./.;
 
             cargoLock = {

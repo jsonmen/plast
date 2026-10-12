@@ -129,7 +129,7 @@ pub use legacy::{MmapPretokenizedDataLoader, MmapPretokenizedDataLoaderBytes};
 #[cfg(feature = "pretokenizer")]
 pub use pretokenizer::{
     ShardLoader, pretokenize_dataset,
-    utils::{fetch_arrow_files, fetch_bin_files},
+    utils::{fetch_arrow_files, fetch_bin_files, fetch_data_files},
 };
 
 // Storage feature re-exports

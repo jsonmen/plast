@@ -1,6 +1,6 @@
 [package]
 name = "plast"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A high-performance data pipeline designed to pretokenize datasets and stream them directly to your training loop with zero-copy memory mapping."
 license = "MIT OR Apache-2.0"
@@ -51,6 +51,7 @@ full = [
     "pretokenizer",
     "mmap-storage",
     "burn",
+    "experimental-buffer-storage"
 ]
 
 [dependencies]
